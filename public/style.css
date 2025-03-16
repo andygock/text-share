@@ -1,0 +1,102 @@
+/* public/style.css */
+body {
+  font-family: sans-serif;
+  margin: 20px;
+  background-color: #f4f4f4;
+  color: #333;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.container {
+  background-color: #fff;
+  padding: 30px;
+  border-radius: 8px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  width: 80%;
+  max-width: 800px;
+}
+
+h1 {
+  margin-bottom: 20px;
+  color: #555;
+}
+
+#header {
+  display: flex;
+  justify-content: space-between;
+}
+
+footer {
+  text-align: center;
+  margin-top: 20px;
+}
+
+a {
+  text-decoration: none;
+  color: #007bff;
+}
+
+.button {
+  background-color: #007bff;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.button:hover {
+  background-color: #0056b3;
+}
+
+#qrcode {
+  margin: 20px auto;
+}
+
+textarea {
+  width: 100%;
+  padding: 15px;
+  margin-bottom: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 16px;
+  min-height: 150px;
+  box-sizing: border-box;
+  resize: vertical; /* Allow vertical resizing */
+}
+
+.users-info {
+  text-align: left;
+  padding: 15px;
+  border: 1px solid #eee;
+  border-radius: 5px;
+  background-color: #fafafa;
+}
+
+.users-info p {
+  margin-top: 0;
+  margin-bottom: 5px;
+}
+
+#userList {
+  list-style: none;
+  padding-left: 0;
+}
+
+#userList li {
+  margin-bottom: 3px;
+  font-size: 0.9em;
+  color: #777;
+}
+
+.privacy-note {
+  font-size: 0.8em;
+  color: #888;
+  margin-top: 15px;
+  text-align: center;
+}
