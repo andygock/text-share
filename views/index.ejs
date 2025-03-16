@@ -45,7 +45,10 @@
 
     <script>
       const roomId = "<%= roomId %>";
-      const websocket = new WebSocket(`ws://${window.location.host}/${roomId}`);
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const websocket = new WebSocket(
+        `${protocol}://${window.location.host}/${roomId}`
+      );
       const sharedTextarea = document.getElementById("sharedText");
       const qrcodeDiv = document.getElementById("qrcode");
       const userCountSpan = document.getElementById("userCount");
