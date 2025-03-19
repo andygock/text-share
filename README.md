@@ -34,11 +34,13 @@ Real-time Text Share is a simple and privacy-focused web application that allows
 1. **Clone the repository:**
 
     ```bash
-    git clone [repository URL here]
-    cd real-time-text-share
+    git clone https://github.com/andygock/text-share
+    cd text-share
     ```
 
 2. **Install Node.js dependencies:**
+
+I used **pnpm** for this project, but it should work with regular **npm** too.
 
     ```bash
     pnpm install

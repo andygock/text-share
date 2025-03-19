@@ -43,7 +43,12 @@ app.get("/:roomId", (req, res) => {
 
 wss.on("connection", (ws, req) => {
   const roomId = req.url.substring(1); // URL after / is the roomId
-  const clientIp = req.socket.remoteAddress; // Get client IP address
+
+  // Attempt to get the client's IP address from various sources
+  const clientIp =
+    req.headers["x-forwarded-for"]?.split(",").shift() || // Check for forwarded IP (if behind a proxy)
+    req.socket.remoteAddress || // Fallback to socket's remote address
+    "127.0.0.1";
 
   if (rooms.size >= MAX_ROOMS) {
     ws.close(1008, "Maximum number of rooms reached.");

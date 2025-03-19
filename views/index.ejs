@@ -27,6 +27,14 @@
         id="sharedText"
         placeholder="Start typing to share..."
       ></textarea>
+      <div>
+        <label>
+          <button class="button" id="generate-barcodes">
+            Generate QRCodes for Text
+          </button>
+        </label>
+      </div>
+      <div class="barcodes"></div>
       <div class="users-info">
         <p>Connected Users: <span id="userCount">0</span></p>
         <ul id="userList"></ul>
@@ -44,87 +52,161 @@
     </div>
 
     <script>
-      const roomId = "<%= roomId %>";
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const websocket = new WebSocket(
-        `${protocol}://${window.location.host}/${roomId}`
-      );
-      const sharedTextarea = document.getElementById("sharedText");
-      const qrcodeDiv = document.getElementById("qrcode");
-      const userCountSpan = document.getElementById("userCount");
-      const userListUl = document.getElementById("userList");
+      (function () {
+        //
+        // qrcode generation
+        //
 
-      // Generate QR Code
-      const currentUrl = window.location.href;
-      new QRCode(qrcodeDiv, {
-        text: currentUrl,
-        width: 128,
-        height: 128,
-        colorDark: "#000",
-        colorLight: "#fff",
-        correctLevel: QRCode.CorrectLevel.H,
-      });
+        function generateTextAreaBarcodes() {
+          // generate barcodes, one qrcode per line in the textarea, ignore white space only lines
+          const lines = sharedTextarea.value.split("\n");
+          const barcodesDiv = document.querySelector(".barcodes");
+          barcodesDiv.innerHTML = ""; // Clear existing barcodes
 
-      // send message to server when user types in textarea
-      sharedTextarea.addEventListener("input", () => {
-        websocket.send(sharedTextarea.value);
-      });
+          lines.forEach((line) => {
+            const trimmedLine = line.trim();
+            if (trimmedLine) {
+              const barcodeDiv = document.createElement("div");
+              barcodeDiv.className = "barcode-item";
+              barcodesDiv.appendChild(barcodeDiv);
+              new QRCode(barcodeDiv, {
+                text: trimmedLine,
+                width: 128,
+                height: 128,
+                colorDark: "#000",
+                colorLight: "#fff",
+                correctLevel: QRCode.CorrectLevel.H,
+              });
 
-      // receive message from server
-      websocket.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        if (message.type === "textUpdate") {
-          sharedTextarea.value = message.text;
-        } else if (message.type === "userList") {
-          updateUserList(message.users);
-        } else if (message.type === "userConnected") {
-          addUser(message.ip);
-        } else if (message.type === "userDisconnected") {
-          removeUser(message.ip);
+              // add text under the barcode
+              const textDiv = document.createElement("div");
+              textDiv.className = "barcode-text";
+              textDiv.textContent = trimmedLine;
+              barcodeDiv.appendChild(textDiv);
+            }
+          });
         }
-      };
 
-      function updateUserList(users) {
-        userListUl.innerHTML = ""; // Clear existing list
-        users.forEach((ip) => addUserToList(ip));
-        userCountSpan.textContent = users.length;
-      }
+        const barcodesDiv = document.querySelector(".barcodes");
+        const generateBarcodesButton =
+          document.getElementById("generate-barcodes");
 
-      function addUser(ip) {
-        addUserToList(ip);
-        userCountSpan.textContent = parseInt(userCountSpan.textContent) + 1;
-      }
+        generateBarcodesButton.addEventListener("click", () => {
+          generateTextAreaBarcodes();
+          generateBarcodesButton.dataset.hash = inputHash;
+          generateBarcodesButton.disabled = true;
+        });
 
-      function removeUser(ip) {
-        removeUserFromList(ip);
-        userCountSpan.textContent = parseInt(userCountSpan.textContent) - 1;
-      }
+        //
+        // input text and room handling
+        //
 
-      function addUserToList(ip) {
-        const li = document.createElement("li");
-        li.textContent = ip;
-        li.dataset.ip = ip; // Store IP for easy removal
-        userListUl.appendChild(li);
-      }
+        const roomId = "<%= roomId %>";
+        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+        const websocket = new WebSocket(
+          `${protocol}://${window.location.host}/${roomId}`
+        );
+        const sharedTextarea = document.getElementById("sharedText");
+        const qrcodeDiv = document.getElementById("qrcode");
+        const userCountSpan = document.getElementById("userCount");
+        const userListUl = document.getElementById("userList");
 
-      function removeUserFromList(ip) {
-        const userLi = userListUl.querySelector(`li[data-ip="${ip}"]`);
-        if (userLi) {
-          userListUl.removeChild(userLi);
+        let inputHash = "";
+
+        function crc32(str) {
+          // CRC32 hash function
+          let crc = 0xffffffff;
+          for (let i = 0; i < str.length; i++) {
+            crc ^= str.charCodeAt(i);
+            for (let j = 0; j < 8; j++) {
+              crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+            }
+          }
+          return (crc ^ 0xffffffff) >>> 0;
         }
-      }
 
-      websocket.onopen = () => {
-        console.log("WebSocket connection opened");
-      };
+        function updateHash(str) {
+          // generate crc32 hash of the string
+          const hash = crc32(str);
+          inputHash = hash;
+        }
 
-      websocket.onclose = () => {
-        console.log("WebSocket connection closed");
-      };
+        // Generate QR Code for url
+        const currentUrl = window.location.href;
+        new QRCode(qrcodeDiv, {
+          text: currentUrl,
+          width: 128,
+          height: 128,
+          colorDark: "#000",
+          colorLight: "#fff",
+          correctLevel: QRCode.CorrectLevel.H,
+        });
 
-      websocket.onerror = (error) => {
-        console.error("WebSocket error:", error);
-      };
+        // send message to server when user types in textarea
+        sharedTextarea.addEventListener("input", () => {
+          websocket.send(sharedTextarea.value);
+          updateHash(sharedTextarea.value);
+          generateBarcodesButton.disabled = false;
+        });
+
+        // receive message from server
+        websocket.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          if (message.type === "textUpdate") {
+            sharedTextarea.value = message.text;
+            updateHash(message.text);
+            generateBarcodesButton.disabled = false;
+          } else if (message.type === "userList") {
+            updateUserList(message.users);
+          } else if (message.type === "userConnected") {
+            addUser(message.ip);
+          } else if (message.type === "userDisconnected") {
+            removeUser(message.ip);
+          }
+        };
+
+        function updateUserList(users) {
+          userListUl.innerHTML = ""; // Clear existing list
+          users.forEach((ip) => addUserToList(ip));
+          userCountSpan.textContent = users.length;
+        }
+
+        function addUser(ip) {
+          addUserToList(ip);
+          userCountSpan.textContent = parseInt(userCountSpan.textContent) + 1;
+        }
+
+        function removeUser(ip) {
+          removeUserFromList(ip);
+          userCountSpan.textContent = parseInt(userCountSpan.textContent) - 1;
+        }
+
+        function addUserToList(ip) {
+          const li = document.createElement("li");
+          li.textContent = ip;
+          li.dataset.ip = ip; // Store IP for easy removal
+          userListUl.appendChild(li);
+        }
+
+        function removeUserFromList(ip) {
+          const userLi = userListUl.querySelector(`li[data-ip="${ip}"]`);
+          if (userLi) {
+            userListUl.removeChild(userLi);
+          }
+        }
+
+        websocket.onopen = () => {
+          console.log("WebSocket connection opened");
+        };
+
+        websocket.onclose = () => {
+          console.log("WebSocket connection closed");
+        };
+
+        websocket.onerror = (error) => {
+          console.error("WebSocket error:", error);
+        };
+      })();
     </script>
   </body>
 </html>

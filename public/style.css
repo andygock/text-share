@@ -54,6 +54,11 @@ a {
   background-color: #0056b3;
 }
 
+.button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
 #qrcode {
   margin: 20px auto;
 }
@@ -99,4 +104,25 @@ textarea {
   color: #888;
   margin-top: 15px;
   text-align: center;
+}
+
+.barcodes {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.barcodes > div {
+  margin: 10px 10px;
+  max-width: 128px;
+}
+
+.barcode-text {
+  font-size: x-small;
+  font-family: monospace;
+  word-wrap: break-word;
+  max-width: 128px;
 }
