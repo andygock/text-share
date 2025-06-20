@@ -35,6 +35,23 @@
         </label>
       </div>
       <div class="barcodes"></div>
+      <div id="image-share">
+        <h2>Share Images</h2>
+        <form id="imageUploadForm" enctype="multipart/form-data">
+          <input
+            type="file"
+            id="imageInput"
+            name="image"
+            accept="image/png,image/jpeg,image/webp"
+            style="display: none"
+          />
+          <div id="dropArea">
+            Drag & Drop or
+            <button type="button" id="selectImageBtn">Select Image</button>
+          </div>
+        </form>
+        <div id="sharedImages"></div>
+      </div>
       <div class="users-info">
         <p>Connected Users: <span id="userCount">0</span></p>
         <ul id="userList"></ul>
@@ -194,6 +211,90 @@
             userListUl.removeChild(userLi);
           }
         }
+
+        //
+        // Image sharing logic
+        //
+
+        const imageInput = document.getElementById("imageInput");
+        const selectImageBtn = document.getElementById("selectImageBtn");
+        const dropArea = document.getElementById("dropArea");
+        const imageUploadForm = document.getElementById("imageUploadForm");
+        const sharedImages = document.getElementById("sharedImages");
+
+        // Prevent default drag behaviors
+        ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
+          dropArea.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          });
+        });
+        dropArea.addEventListener("dragover", () =>
+          dropArea.classList.add("dragover")
+        );
+        dropArea.addEventListener("dragleave", () =>
+          dropArea.classList.remove("dragover")
+        );
+        dropArea.addEventListener("drop", (e) => {
+          dropArea.classList.remove("dragover");
+          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            uploadImage(e.dataTransfer.files[0]);
+          }
+        });
+        selectImageBtn.addEventListener("click", () => imageInput.click());
+        imageInput.addEventListener("change", (e) => {
+          if (e.target.files && e.target.files[0]) {
+            uploadImage(e.target.files[0]);
+          }
+        });
+        function uploadImage(file) {
+          const allowed = ["image/png", "image/jpeg", "image/webp"];
+          if (!allowed.includes(file.type)) {
+            alert("Only PNG, JPG, and WEBP images are allowed.");
+            return;
+          }
+          const formData = new FormData();
+          formData.append("image", file);
+          fetch(`/${roomId}/upload`, {
+            method: "POST",
+            body: formData,
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              if (!data.url) {
+                alert("Upload failed.");
+              }
+              // Do not call addImageToUI here; wait for WebSocket broadcast
+            })
+            .catch(() => alert("Upload failed."));
+        }
+        function addImageToUI(url, filename) {
+          const div = document.createElement("div");
+          div.className = "shared-image";
+          const img = document.createElement("img");
+          img.src = url;
+          img.alt = filename;
+          img.loading = "lazy";
+          img.style.maxWidth = "200px";
+          img.style.maxHeight = "200px";
+          const dl = document.createElement("a");
+          dl.href = url;
+          dl.download = filename;
+          dl.textContent = "Download";
+          div.appendChild(img);
+          div.appendChild(document.createElement("br"));
+          div.appendChild(dl);
+          sharedImages.appendChild(div);
+        }
+        // Listen for imageUpload events from WebSocket
+        websocket.addEventListener("message", (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            if (message.type === "imageUpload") {
+              addImageToUI(message.url, message.filename);
+            }
+          } catch {}
+        });
 
         websocket.onopen = () => {
           console.log("WebSocket connection opened");

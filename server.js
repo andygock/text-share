@@ -4,6 +4,8 @@ const http = require("http");
 const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
 const path = require("path");
+const multer = require("multer");
+const fs = require("fs");
 
 const MAX_ROOMS = 100; // Maximum number of rooms
 const MAX_CLIENTS_PER_ROOM = 10; // Maximum number of clients per room
@@ -22,6 +24,35 @@ const wss = new WebSocket.Server({ server });
 // Store connected clients in rooms, using UUID as room ID
 const rooms = new Map();
 const clientIpCount = new Map();
+
+// Set up multer for image uploads
+const uploadDir = path.join(__dirname, "public", "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    const name = uuidv4() + ext;
+    cb(null, name);
+  },
+});
+const upload = multer({
+  storage: storage,
+  fileFilter: function (req, file, cb) {
+    const allowed = [".png", ".jpg", ".jpeg", ".webp"];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only images are allowed (png, jpg, webp)"));
+    }
+  },
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+});
 
 app.get("/", (req, res) => {
   const uuid = uuidv4();
@@ -150,6 +181,29 @@ wss.on("connection", (ws, req) => {
       rooms.delete(roomId);
     }
   });
+});
+
+// Image upload endpoint
+app.post("/:roomId/upload", upload.single("image"), (req, res) => {
+  const roomId = req.params.roomId;
+  if (!rooms.has(roomId)) {
+    return res.status(400).json({ error: "Room does not exist." });
+  }
+  const fileUrl = `/uploads/${req.file.filename}`;
+  // Broadcast image to all clients in the room
+  const roomClients = rooms.get(roomId);
+  roomClients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(
+        JSON.stringify({
+          type: "imageUpload",
+          url: fileUrl,
+          filename: req.file.originalname,
+        })
+      );
+    }
+  });
+  res.json({ url: fileUrl });
 });
 
 const PORT = process.env.PORT || 3000;
