@@ -1,6 +1,6 @@
 # Real-time Text & Image Share
 
-A minimalist web application for sharing text and images between devices in real-time, privately and without data persistence.
+A minimalist web application for sharing text and images between devices in real-time, privately and without persistent storage.
 
 ## Project Description
 
@@ -11,12 +11,13 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 * **Real-time Synchronization:** Text and images shared on one device instantly appear on all other connected devices in the same room.
 * **Image Sharing:** Upload or drag-and-drop images (PNG, JPG, WEBP) to share with all users in the room. Images are automatically resampled, compressed, and stripped of metadata for privacy and efficiency. Each image displays its dimensions and file size in the UI, and can be downloaded by any user.
 * **Automatic Image Optimization:** All images are processed on the server to be under 500kB, resized if needed, and have all metadata removed. If an image cannot be compressed below 500kB, the upload is rejected.
-* **No Data Persistence:** Absolutely no text, images, or user data is stored on the server. Everything is transient and exists only in memory while users are connected. Once all users disconnect, the room and its data are automatically cleared, and images are deleted.
-* **Privacy Focused:** Designed with privacy in mind. No accounts, no tracking, no server-side storage of your text or images.
+* **Temporary Image Storage:** Images are stored temporarily on the server filesystem for the duration of the room's activity or up to 15 minutes. Images are deleted when a room is empty or after 15 minutes, whichever comes first.
+* **No Persistent Text/Data Storage:** No text or user data is stored persistently on the server. Text and user presence exist only in memory while users are connected.
+* **Privacy Focused:** Designed with privacy in mind. No accounts, no tracking, no persistent server-side storage of your text or images.
 * **Minimalist UI:** Clean and simple user interface for easy use on any device.
 * **QR Code for Easy Sharing:** A QR code of the unique URL is automatically generated, making it easy to open the same room on mobile devices.
 * **User Presence:** Displays the number of connected users and their IP addresses (for transparency within the room).
-* **Room Cleanup:** Automatically closes WebSocket connections and frees up server resources when all users disconnect from a room. Images are deleted when a room is empty or after 60 minutes.
+* **Room Cleanup:** Automatically closes WebSocket connections and frees up server resources when all users disconnect from a room. Images are deleted when a room is empty or after 15 minutes.
 * **Rate Limiting:** Uploads are rate-limited globally and per IP to prevent abuse.
 
 ## Technology Stack
@@ -68,13 +69,13 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 3. **Share the URL:**
 
-    * **Scan the QR code:** Use a QR code scanner app on your mobile device to scan the QR code displayed on the page. This will open the same URL in your mobile browser.
-    * **Manually type or copy the URL:**  Share the full URL (e.g., `http://localhost:3000/[uuid]`) with anyone you want to share text or images with.
+    - **Scan the QR code:** Use a QR code scanner app on your mobile device to scan the QR code displayed on the page. This will open the same URL in your mobile browser.
+    - **Manually type or copy the URL:**  Share the full URL (e.g., `http://localhost:3000/[uuid]`) with anyone you want to share text or images with.
 
 4. **Start sharing:**
 
-    * **Text:** Begin typing in the textarea. The text will instantly synchronize with all other devices that are connected to the same URL.
-    * **Images:** Upload or drag-and-drop an image file (PNG, JPG, WEBP) into the image sharing area. The image will be optimized and broadcast to all users in the room, showing its dimensions and file size. All users can download the image.
+    - **Text:** Begin typing in the textarea. The text will instantly synchronize with all other devices that are connected to the same URL.
+    - **Images:** Upload or drag-and-drop an image file (PNG, JPG, WEBP) into the image sharing area. The image will be optimized and broadcast to all users in the room, showing its dimensions and file size. All users can download the image.
 
 5. **User List:**
 
@@ -86,8 +87,9 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 ## Privacy Considerations
 
+* **Temporary Image Storage:** Images are stored temporarily on the server filesystem for the duration of the room or up to 15 minutes, then deleted. Images are not stored permanently.
 * **IP Address Visibility:**  For transparency, the application displays the IP addresses of all connected users in the room to each other. Please be aware of this if you have privacy concerns about sharing your IP address with others in the room. This is a necessary part of the user presence feature in this minimalist design.
-* **No Data Storage:**  The application is designed to be completely stateless. No text content, images, or user data is stored on the server persistently.  Data exists only in memory during active sessions.
+* **No Persistent Text/Data Storage:**  The application is designed to be stateless for text and user presence. No text content, images, or user data is stored on the server persistently.  Data exists only in memory (for text) or temporarily on disk (for images) during active sessions.
 * **HTTPS Recommendation:** For enhanced security and privacy, it is strongly recommended to deploy this application with HTTPS enabled to encrypt communication between clients and the server.
 
 ---
