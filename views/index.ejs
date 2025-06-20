@@ -52,6 +52,11 @@
           </div>
         </form>
         <div id="sharedImages"></div>
+        <!-- Upload status indicator -->
+        <div
+          id="uploadStatus"
+          style="display: none; margin: 0.5rem 0; text-align: center"
+        ></div>
       </div>
       <div class="users-info">
         <p>Connected Users: <span id="userCount">0</span></p>
@@ -258,6 +263,29 @@
             uploadImage(e.target.files[0]);
           }
         });
+        // Upload feedback indicator
+        let uploadStatus = document.getElementById("uploadStatus");
+        if (!uploadStatus) {
+          uploadStatus = document.createElement("div");
+          uploadStatus.id = "uploadStatus";
+          uploadStatus.style.display = "none";
+          uploadStatus.style.margin = "0.5rem 0";
+          uploadStatus.style.textAlign = "center";
+          document
+            .getElementById("image-share")
+            .insertBefore(uploadStatus, sharedImages);
+        }
+        let uploadProgressBar = document.getElementById("uploadProgressBar");
+        if (!uploadProgressBar) {
+          uploadProgressBar = document.createElement("progress");
+          uploadProgressBar.id = "uploadProgressBar";
+          uploadProgressBar.max = 100;
+          uploadProgressBar.value = 0;
+          uploadProgressBar.style.display = "none";
+          uploadProgressBar.style.width = "60%";
+          uploadStatus.appendChild(uploadProgressBar);
+        }
+
         async function uploadImage(file) {
           const allowed = ["image/png", "image/jpeg", "image/webp"];
           if (!allowed.includes(file.type)) {
@@ -266,29 +294,54 @@
           }
           const formData = new FormData();
           formData.append("image", file);
-          try {
-            const res = await fetch(`/${roomId}/upload`, {
-              method: "POST",
-              body: formData,
-            });
+          uploadStatus.textContent = "Uploading...";
+          uploadStatus.style.display = "block";
+          uploadProgressBar.value = 0;
+          uploadProgressBar.style.display = "inline-block";
+
+          // Use XMLHttpRequest for real upload progress
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", `/${roomId}/upload`);
+
+          xhr.upload.onprogress = function (e) {
+            if (e.lengthComputable) {
+              const percent = Math.round((e.loaded / e.total) * 100);
+              uploadProgressBar.value = percent;
+              uploadStatus.textContent = `Uploading... ${percent}%`;
+            }
+          };
+
+          xhr.onload = function () {
+            uploadProgressBar.style.display = "none";
             let data;
             try {
-              data = await res.json();
+              data = JSON.parse(xhr.responseText);
             } catch {
-              throw new Error("Upload failed.");
-            }
-            if (!res.ok) {
-              if (data && data.error) {
-                alert("Upload error: " + data.error);
-              } else {
-                alert("Upload failed.");
-              }
+              uploadStatus.textContent = "Upload failed.";
+              setTimeout(() => (uploadStatus.style.display = "none"), 3000);
               return;
             }
+            if (xhr.status < 200 || xhr.status >= 300) {
+              if (data && data.error) {
+                uploadStatus.textContent = "Error: " + data.error;
+              } else {
+                uploadStatus.textContent = "Upload failed.";
+              }
+              setTimeout(() => (uploadStatus.style.display = "none"), 3000);
+              return;
+            }
+            uploadStatus.textContent = "Upload complete!";
+            setTimeout(() => (uploadStatus.style.display = "none"), 1200);
             // Do not call addImageToUI here; wait for WebSocket broadcast
-          } catch (err) {
-            alert(err.message || "Upload failed.");
-          }
+          };
+
+          xhr.onerror = function () {
+            uploadProgressBar.style.display = "none";
+            uploadStatus.textContent = "Upload failed.";
+            setTimeout(() => (uploadStatus.style.display = "none"), 3000);
+          };
+
+          xhr.send(formData);
         }
         function addImageToUI(url, filename, width, height, sizeKB) {
           const div = document.createElement("div");
