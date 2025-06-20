@@ -7,6 +7,7 @@ const path = require("path");
 const multer = require("multer");
 const fs = require("fs");
 const { RateLimiterMemory } = require("rate-limiter-flexible");
+const sharp = require("sharp");
 
 const MAX_ROOMS = 100; // Maximum number of rooms
 const MAX_CLIENTS_PER_ROOM = 10; // Maximum number of clients per room
@@ -96,7 +97,7 @@ const upload = multer({
       cb(new Error("Only images are allowed (png, jpg, webp)"));
     }
   },
-  limits: { fileSize: IMAGE_MAX_SIZE },
+  limits: { fileSize: 10 * 1024 * 1024 }, // Allow up to 10MB for resampling
 });
 
 //
@@ -271,6 +272,72 @@ app.post("/:roomId/upload", upload.single("image"), async (req, res) => {
   }
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded." });
+  }
+
+  // Always process the image with sharp: strip metadata, resize if needed, compress
+  const inputPath = req.file.path;
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  const tempOutputPath = inputPath + ".tmp";
+  let processed = false;
+  try {
+    let image = sharp(inputPath);
+
+    // Resize only if image is larger than 1280px in any dimension
+    const metadata = await image.metadata();
+    if (metadata.width > 1280 || metadata.height > 1280) {
+      image = image.resize({ width: 1280, height: 1280, fit: "inside" });
+    }
+
+    // Always auto-orient
+    image = image.rotate();
+
+    // Compress and output
+    if (ext === ".jpg" || ext === ".jpeg") {
+      image = image.jpeg({ quality: 80, mozjpeg: true, force: true });
+    } else if (ext === ".png") {
+      image = image.png({ quality: 80, compressionLevel: 9, force: true });
+    } else if (ext === ".webp") {
+      image = image.webp({ quality: 80, force: true });
+    }
+    await image.toFile(tempOutputPath);
+
+    // If still >500kB, try to reduce quality further
+    let stats = fs.statSync(tempOutputPath);
+    let quality = 70;
+    while (stats.size > 500 * 1024 && quality >= 40) {
+      if (ext === ".jpg" || ext === ".jpeg") {
+        await sharp(tempOutputPath)
+          .jpeg({ quality, mozjpeg: true, force: true })
+          .toFile(tempOutputPath);
+      } else if (ext === ".png") {
+        await sharp(tempOutputPath)
+          .png({ quality, compressionLevel: 9, force: true })
+          .toFile(tempOutputPath);
+      } else if (ext === ".webp") {
+        await sharp(tempOutputPath)
+          .webp({ quality, force: true })
+          .toFile(tempOutputPath);
+      }
+      stats = fs.statSync(tempOutputPath);
+      quality -= 10;
+    }
+
+    // Replace original file with processed file
+    fs.renameSync(tempOutputPath, inputPath);
+    processed = true;
+  } catch (err) {
+    // If sharp fails, remove the file and return error
+    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+    if (fs.existsSync(tempOutputPath)) fs.unlinkSync(tempOutputPath);
+    return res.status(400).json({ error: "Image processing failed." });
+  }
+  // Final check: if still too large, reject
+  const finalStats = fs.statSync(inputPath);
+  if (finalStats.size > 500 * 1024) {
+    fs.unlinkSync(inputPath);
+    return res
+      .status(413)
+      .json({ error: "Image could not be compressed below 500kB." });
   }
 
   // Track image meta for cleanup
