@@ -198,20 +198,62 @@
           }
         };
 
+        // Track user count for upload enable/disable
+        let userCount = 0;
+        function setImageUploadEnabled(enabled) {
+          imageInput.disabled = !enabled;
+          selectImageBtn.disabled = !enabled;
+          dropArea.style.pointerEvents = enabled ? "auto" : "none";
+          dropArea.style.opacity = enabled ? "1" : "0.5";
+          const infoMsgId = "image-upload-info-msg";
+          let infoMsg = document.getElementById(infoMsgId);
+          if (!enabled) {
+            dropArea.title =
+              "You must have at least 2 users in the room to upload images.";
+            selectImageBtn.title =
+              "You must have at least 2 users in the room to upload images.";
+            if (!infoMsg) {
+              infoMsg = document.createElement("div");
+              infoMsg.id = infoMsgId;
+              infoMsg.style.color = "#a94442";
+              infoMsg.style.fontSize = "0.95rem";
+              infoMsg.style.margin = "0.5rem 0 0.5rem 0";
+              infoMsg.style.textAlign = "center";
+              infoMsg.textContent =
+                "You cannot upload images because there is no one else connected to this room.";
+              document
+                .getElementById("image-share")
+                .insertBefore(infoMsg, document.getElementById("sharedImages"));
+            } else {
+              infoMsg.style.display = "block";
+            }
+          } else {
+            dropArea.title = "";
+            selectImageBtn.title = "Select Image";
+            if (infoMsg) infoMsg.style.display = "none";
+          }
+        }
+
         function updateUserList(users) {
           userListUl.innerHTML = ""; // Clear existing list
           users.forEach((ip) => addUserToList(ip));
           userCountSpan.textContent = users.length;
+          userCount = users.length;
+          setImageUploadEnabled(userCount > 1);
         }
 
         function addUser(ip) {
           addUserToList(ip);
-          userCountSpan.textContent = parseInt(userCountSpan.textContent) + 1;
+          userCount = parseInt(userCountSpan.textContent) + 1;
+          userCountSpan.textContent = userCount;
+          setImageUploadEnabled(userCount > 1);
         }
 
         function removeUser(ip) {
           removeUserFromList(ip);
-          userCountSpan.textContent = parseInt(userCountSpan.textContent) - 1;
+          userCount = parseInt(userCountSpan.textContent) - 1;
+          userCountSpan.textContent = userCount;
+          setImageUploadEnabled(userCount > 1);
         }
 
         function addUserToList(ip) {
@@ -395,6 +437,9 @@
         websocket.onerror = (error) => {
           console.error("WebSocket error:", error);
         };
+
+        // On page load, disable upload if only one user
+        setImageUploadEnabled(false);
       })();
     </script>
   </body>

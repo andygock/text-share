@@ -168,6 +168,13 @@ app.post("/:roomId/upload", upload.single("image"), async (req, res) => {
   if (!rooms.has(roomId)) {
     return res.status(400).json({ error: "Room does not exist." });
   }
+  // Use the existing roomClients variable for both checks
+  const roomClients = rooms.get(roomId);
+  if (!roomClients || roomClients.size <= 1) {
+    return res.status(400).json({
+      error: "Cannot upload images when you are the only user in the room.",
+    });
+  }
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded." });
   }
@@ -213,7 +220,6 @@ app.post("/:roomId/upload", upload.single("image"), async (req, res) => {
 
   const fileUrl = `/uploads/${req.file.filename}`;
   // Broadcast image to all clients in the room, including dimensions and size
-  const roomClients = rooms.get(roomId);
   roomClients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(
