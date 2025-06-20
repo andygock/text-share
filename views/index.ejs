@@ -27,12 +27,13 @@
         id="sharedText"
         placeholder="Start typing to share..."
       ></textarea>
-      <div>
-        <label>
-          <button class="button" id="generate-barcodes">
-            Generate QRCodes for Text
-          </button>
-        </label>
+      <div class="textarea-barcode-controls">
+        <button class="button" id="generate-barcodes">
+          Generate QRCodes for Text
+        </button>
+        <button id="close-barcodes" title="Hide QR Codes" style="display: none">
+          ✕
+        </button>
       </div>
       <div class="barcodes"></div>
       <div id="image-share">
@@ -107,11 +108,21 @@
         const barcodesDiv = document.querySelector(".barcodes");
         const generateBarcodesButton =
           document.getElementById("generate-barcodes");
+        const closeBarcodesButton = document.getElementById("close-barcodes");
 
         generateBarcodesButton.addEventListener("click", () => {
           generateTextAreaBarcodes();
           generateBarcodesButton.dataset.hash = inputHash;
           generateBarcodesButton.disabled = true;
+          closeBarcodesButton.style.display = "inline-block";
+          barcodesDiv.style.display = "block";
+        });
+
+        closeBarcodesButton.addEventListener("click", () => {
+          barcodesDiv.innerHTML = "";
+          barcodesDiv.style.display = "none";
+          closeBarcodesButton.style.display = "none";
+          generateBarcodesButton.disabled = false;
         });
 
         //
