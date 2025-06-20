@@ -279,7 +279,7 @@
             alert(err.message || "Upload failed.");
           }
         }
-        function addImageToUI(url, filename) {
+        function addImageToUI(url, filename, width, height, sizeKB) {
           const div = document.createElement("div");
           div.className = "shared-image";
           const img = document.createElement("img");
@@ -292,9 +292,16 @@
           dl.href = url;
           dl.download = filename;
           dl.textContent = "Download";
+          const info = document.createElement("div");
+          if (width && height && sizeKB) {
+            info.textContent = `${width}x${height}px, ${sizeKB} kB`;
+            info.className = "image-info";
+          }
           div.appendChild(img);
           div.appendChild(document.createElement("br"));
           div.appendChild(dl);
+          if (info.textContent) div.appendChild(document.createElement("br"));
+          div.appendChild(info);
           sharedImages.appendChild(div);
         }
         // Listen for imageUpload events from WebSocket
@@ -302,7 +309,13 @@
           try {
             const message = JSON.parse(event.data);
             if (message.type === "imageUpload") {
-              addImageToUI(message.url, message.filename);
+              addImageToUI(
+                message.url,
+                message.filename,
+                message.width,
+                message.height,
+                message.sizeKB
+              );
             }
           } catch {}
         });

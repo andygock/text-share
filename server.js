@@ -200,8 +200,19 @@ app.post("/:roomId/upload", upload.single("image"), async (req, res) => {
     timestamp: Date.now(),
   });
 
+  // Get image dimensions and size
+  let width = 0,
+    height = 0,
+    sizeKB = 0;
+  try {
+    const sharpMeta = await require("sharp")(req.file.path).metadata();
+    width = sharpMeta.width;
+    height = sharpMeta.height;
+    sizeKB = Math.ceil(finalStats.size / 1024);
+  } catch {}
+
   const fileUrl = `/uploads/${req.file.filename}`;
-  // Broadcast image to all clients in the room
+  // Broadcast image to all clients in the room, including dimensions and size
   const roomClients = rooms.get(roomId);
   roomClients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
@@ -210,6 +221,9 @@ app.post("/:roomId/upload", upload.single("image"), async (req, res) => {
           type: "imageUpload",
           url: fileUrl,
           filename: req.file.originalname,
+          width,
+          height,
+          sizeKB,
         })
       );
     }
