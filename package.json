@@ -4,6 +4,7 @@
     "express": "^4.21.2",
     "multer": "^2.0.1",
     "qrcodejs": "^1.0.0",
+    "rate-limiter-flexible": "^7.1.1",
     "uuid": "^11.1.0",
     "ws": "^8.18.1"
   },

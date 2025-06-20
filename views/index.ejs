@@ -63,7 +63,7 @@
         <p>
           <a href="https://github.com/andygock/text-share" target="_blank"
             >GitHub</a
-          >.
+          >
         </p>
       </footer>
     </div>
@@ -247,7 +247,7 @@
             uploadImage(e.target.files[0]);
           }
         });
-        function uploadImage(file) {
+        async function uploadImage(file) {
           const allowed = ["image/png", "image/jpeg", "image/webp"];
           if (!allowed.includes(file.type)) {
             alert("Only PNG, JPG, and WEBP images are allowed.");
@@ -255,18 +255,29 @@
           }
           const formData = new FormData();
           formData.append("image", file);
-          fetch(`/${roomId}/upload`, {
-            method: "POST",
-            body: formData,
-          })
-            .then((res) => res.json())
-            .then((data) => {
-              if (!data.url) {
+          try {
+            const res = await fetch(`/${roomId}/upload`, {
+              method: "POST",
+              body: formData,
+            });
+            let data;
+            try {
+              data = await res.json();
+            } catch {
+              throw new Error("Upload failed.");
+            }
+            if (!res.ok) {
+              if (data && data.error) {
+                alert("Upload error: " + data.error);
+              } else {
                 alert("Upload failed.");
               }
-              // Do not call addImageToUI here; wait for WebSocket broadcast
-            })
-            .catch(() => alert("Upload failed."));
+              return;
+            }
+            // Do not call addImageToUI here; wait for WebSocket broadcast
+          } catch (err) {
+            alert(err.message || "Upload failed.");
+          }
         }
         function addImageToUI(url, filename) {
           const div = document.createElement("div");

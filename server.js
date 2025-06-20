@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require("uuid");
 const path = require("path");
 const multer = require("multer");
 const fs = require("fs");
+const { RateLimiterMemory } = require("rate-limiter-flexible");
 
 const MAX_ROOMS = 100; // Maximum number of rooms
 const MAX_CLIENTS_PER_ROOM = 10; // Maximum number of clients per room
@@ -25,7 +26,51 @@ const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const clientIpCount = new Map();
 
+// --- Image tracking and rate limiting ---
+const IMAGE_MAX_SIZE = 1 * 1024 * 1024; // 1MB
+const IMAGE_MAX_AGE_MS = 60 * 60 * 1000; // 60 minutes
+
+let imageMeta = [];
+
+// --- Rate limiter setup ---
+const globalLimiter = new RateLimiterMemory({
+  points: 100, // global: 100 uploads per hour
+  duration: 60 * 60, // per hour
+});
+const ipLimiter = new RateLimiterMemory({
+  points: 10, // per IP: 10 uploads per hour
+  duration: 60 * 60, // per hour
+  keyPrefix: "ip",
+});
+
+function cleanupOldImages() {
+  const now = Date.now();
+  imageMeta = imageMeta.filter((meta) => {
+    if (now - meta.timestamp > IMAGE_MAX_AGE_MS) {
+      try {
+        fs.unlinkSync(meta.path);
+      } catch {}
+      return false;
+    }
+    return true;
+  });
+}
+
+function cleanupRoomImages(roomId) {
+  imageMeta = imageMeta.filter((meta) => {
+    if (meta.roomId === roomId) {
+      try {
+        fs.unlinkSync(meta.path);
+      } catch {}
+      return false;
+    }
+    return true;
+  });
+}
+
+//
 // Set up multer for image uploads
+//
 const uploadDir = path.join(__dirname, "public", "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -51,7 +96,27 @@ const upload = multer({
       cb(new Error("Only images are allowed (png, jpg, webp)"));
     }
   },
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  limits: { fileSize: IMAGE_MAX_SIZE },
+});
+
+//
+// Delete all images in the uploads directory on server start
+//
+fs.readdir(uploadDir, (err, files) => {
+  if (err) {
+    console.error("Error reading upload directory:", err);
+    return;
+  }
+  files.forEach((file) => {
+    const filePath = path.join(uploadDir, file);
+    fs.unlink(filePath, (err) => {
+      if (err) {
+        console.error(`Error deleting file ${file}:`, err);
+      } else {
+        console.log(`Deleted old image: ${file}`);
+      }
+    });
+  });
 });
 
 app.get("/", (req, res) => {
@@ -167,6 +232,7 @@ wss.on("connection", (ws, req) => {
     if (roomClients.size === 0) {
       console.log(`Room ${roomId} is empty, cleaning up.`);
       rooms.delete(roomId);
+      cleanupRoomImages(roomId); // Remove all images for this room
       // In a more complex app, you might want to explicitly close sockets if needed,
       // but in this simple case, the server and client sockets should close naturally.
       // No explicit socket closing is needed here for basic cleanup.
@@ -184,11 +250,37 @@ wss.on("connection", (ws, req) => {
 });
 
 // Image upload endpoint
-app.post("/:roomId/upload", upload.single("image"), (req, res) => {
+app.post("/:roomId/upload", upload.single("image"), async (req, res) => {
   const roomId = req.params.roomId;
+  const clientIp =
+    req.headers["x-forwarded-for"]?.split(",").shift() ||
+    req.socket.remoteAddress ||
+    "127.0.0.1";
+
+  // Rate limiting with rate-limiter-flexible
+  cleanupOldImages();
+  try {
+    await globalLimiter.consume("global");
+    await ipLimiter.consume(clientIp);
+  } catch (rejRes) {
+    return res.status(429).json({ error: "Upload rate limit exceeded." });
+  }
+
   if (!rooms.has(roomId)) {
     return res.status(400).json({ error: "Room does not exist." });
   }
+  if (!req.file) {
+    return res.status(400).json({ error: "No file uploaded." });
+  }
+
+  // Track image meta for cleanup
+  imageMeta.push({
+    filename: req.file.filename,
+    path: req.file.path,
+    roomId,
+    timestamp: Date.now(),
+  });
+
   const fileUrl = `/uploads/${req.file.filename}`;
   // Broadcast image to all clients in the room
   const roomClients = rooms.get(roomId);
@@ -204,6 +296,21 @@ app.post("/:roomId/upload", upload.single("image"), (req, res) => {
     }
   });
   res.json({ url: fileUrl });
+});
+
+// Error handler for multer (file size, file type, etc.)
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res
+        .status(413)
+        .json({ error: "File too large. Max size is 1MB." });
+    }
+    return res.status(400).json({ error: err.message });
+  } else if (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  next();
 });
 
 const PORT = process.env.PORT || 3000;
