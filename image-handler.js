@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
@@ -5,6 +7,8 @@ const sharp = require("sharp");
 
 const IMAGE_MAX_AGE_MS = 60 * 60 * 1000; // 60 minutes
 const UPLOAD_DIR = path.join(__dirname, "public", "uploads");
+const MULTER_FILE_SIZE_LIMIT =
+  parseInt(process.env.MULTER_FILE_SIZE_LIMIT, 10) || 10 * 1024 * 1024; // default 10MB
 
 // Ensure upload dir exists
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -33,7 +37,7 @@ const upload = multer({
       cb(new Error("Only images are allowed (png, jpg, webp)"));
     }
   },
-  limits: { fileSize: 10 * 1024 * 1024 }, // Allow up to 10MB for resampling
+  limits: { fileSize: MULTER_FILE_SIZE_LIMIT },
 });
 
 let imageMeta = [];
