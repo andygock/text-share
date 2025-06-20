@@ -46,7 +46,7 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 2. **Install Node.js dependencies:**
 
-I used **pnpm** for this project, but it should work with regular **npm** too.
+    I used **pnpm** for this project, but it should work with regular **npm** too.
 
     ```bash
     pnpm install
@@ -63,20 +63,25 @@ I used **pnpm** for this project, but it should work with regular **npm** too.
     The server will start on port 3000 (or the port specified by the `PORT` environment variable).
 
 2. **Open in your browser:**
+
     Navigate to `http://localhost:3000` in your web browser. You will be automatically redirected to a unique URL like `http://localhost:3000/[uuid]`.
 
 3. **Share the URL:**
+
     * **Scan the QR code:** Use a QR code scanner app on your mobile device to scan the QR code displayed on the page. This will open the same URL in your mobile browser.
     * **Manually type or copy the URL:**  Share the full URL (e.g., `http://localhost:3000/[uuid]`) with anyone you want to share text or images with.
 
 4. **Start sharing:**
+
     * **Text:** Begin typing in the textarea. The text will instantly synchronize with all other devices that are connected to the same URL.
     * **Images:** Upload or drag-and-drop an image file (PNG, JPG, WEBP) into the image sharing area. The image will be optimized and broadcast to all users in the room, showing its dimensions and file size. All users can download the image.
 
 5. **User List:**
+
     The "Connected Users" section displays the number of users currently in the room and a list of their IP addresses.
 
 6. **To end sharing:**
+
     Simply close the browser tab or window on all devices. Once all users disconnect, the room is automatically cleared on the server and all images are deleted.
 
 ## Privacy Considerations
