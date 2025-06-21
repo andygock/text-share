@@ -423,6 +423,13 @@ function clearUploadStatusStyles() {
 }
 
 function handleFileUpload(file) {
+  if (isUploading) {
+    setUploadError({
+      text: "Only one file upload is allowed at a time. Please wait for the current upload to finish.",
+      show: true,
+    });
+    return;
+  }
   if (file.size > MAX_IMAGE_UPLOAD_SIZE) {
     setUploadError({
       text: `File too large. Max allowed is ${Math.floor(
@@ -438,6 +445,13 @@ function handleFileUpload(file) {
 selectImageBtn.addEventListener("click", () => imageInput.click());
 
 imageInput.addEventListener("change", (e) => {
+  if (isUploading) {
+    setUploadError({
+      text: "Only one file upload is allowed at a time. Please wait for the current upload to finish.",
+      show: true,
+    });
+    return;
+  }
   if (e.target.files && e.target.files[0]) {
     handleFileUpload(e.target.files[0]);
   }
@@ -446,6 +460,13 @@ imageInput.addEventListener("change", (e) => {
 dropArea.addEventListener("drop", (e) => {
   e.preventDefault();
   dropArea.classList.remove("dragover");
+  if (isUploading) {
+    setUploadError({
+      text: "Only one file upload is allowed at a time. Please wait for the current upload to finish.",
+      show: true,
+    });
+    return;
+  }
   if (e.dataTransfer.files && e.dataTransfer.files[0]) {
     handleFileUpload(e.dataTransfer.files[0]);
   }
@@ -459,6 +480,9 @@ dropArea.addEventListener("dragover", (e) => {
 dropArea.addEventListener("dragleave", () =>
   dropArea.classList.remove("dragover")
 );
+
+// Ensure only one file can be selected in case the attribute is ever changed
+imageInput.removeAttribute("multiple");
 
 // --- WebSocket Connection Events ---
 websocket.onopen = () => {

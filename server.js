@@ -120,6 +120,18 @@ wss.on("connection", (ws, req) => {
       }
       // Handle image protocol
       if (parsed.type === "imageUploadStart") {
+        // Only allow one upload at a time per connection
+        if (ws.imageUploadState) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error:
+                "Only one file upload is allowed at a time. Please wait for the current upload to finish.",
+            })
+          );
+          return;
+        }
         // Rate limiting for image uploads
         try {
           await globalUploadLimiter.consume("global");
