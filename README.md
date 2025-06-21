@@ -8,17 +8,17 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 **Key Features:**
 
-* **Real-time Synchronization:** Text and images shared on one device instantly appear on all other connected devices in the same room.
-* **Image Sharing:** Upload or drag-and-drop images (PNG, JPG, WEBP) to share with all users in the room. Images are automatically resampled, compressed, and stripped of metadata for privacy and efficiency. Each image displays its dimensions and file size in the UI, and can be downloaded by any user.
-* **In-Memory Image Handling (No Disk Storage):** Images are never written to disk. All image processing (resizing, compression, metadata removal) is performed in memory, and images are streamed directly to all connected users via WebSocket. This maximizes privacy and ensures no image files are ever stored on the server.
-* **Automatic Image Optimization:** All images are processed on the server to be under 500kB, resized if needed, and have all metadata removed. If an image cannot be compressed below 500kB, the upload is rejected.
-* **No Persistent Text/Data Storage:** No text or user data is stored persistently on the server. Text and user presence exist only in memory while users are connected.
-* **Privacy Focused:** Designed with privacy in mind. No accounts, no tracking, no persistent server-side storage of your text or images.
-* **Minimalist UI:** Clean and simple user interface for easy use on any device.
-* **QR Code for Easy Sharing:** A QR code of the unique URL is automatically generated, making it easy to open the same room on mobile devices.
-* **User Presence:** Displays the number of connected users and their IP addresses (for transparency within the room).
-* **Room Cleanup:** Automatically closes WebSocket connections and frees up server resources when all users disconnect from a room.
-* **Rate Limiting:** Uploads are rate-limited globally and per IP to prevent abuse.
+- **Real-time Synchronization:** Text and images shared on one device instantly appear on all other connected devices in the same room.
+- **Image Sharing:** Upload or drag-and-drop images (PNG, JPG, WEBP) to share with all users in the room. Images are automatically resampled, compressed, and stripped of metadata for privacy and efficiency. Each image displays its dimensions and file size in the UI, and can be downloaded by any user.
+- **In-Memory Image Handling (No Disk Storage):** Images are never written to disk. All image processing (resizing, compression, metadata removal) is performed in memory, and images are streamed directly to all connected users via WebSocket. This maximizes privacy and ensures no image files are ever stored on the server.
+- **Automatic Image Optimization:** All images are processed on the server to be under 500kB, resized if needed, and have all metadata removed. If an image cannot be compressed below 500kB, the upload is rejected.
+- **No Persistent Text/Data Storage:** No text or user data is stored persistently on the server. Text and user presence exist only in memory while users are connected.
+- **Privacy Focused:** Designed with privacy in mind. No accounts, no tracking, no persistent server-side storage of your text or images.
+- **Minimalist UI:** Clean and simple user interface for easy use on any device.
+- **QR Code for Easy Sharing:** A QR code of the unique URL is automatically generated, making it easy to open the same room on mobile devices.
+- **User Presence:** Displays the number of connected users and their IP addresses (for transparency within the room).
+- **Room Cleanup:** Automatically closes WebSocket connections and frees up server resources when all users disconnect from a room.
+- **Rate Limiting:** Uploads are rate-limited globally and per IP to prevent abuse.
 
 ## In-Memory Image Privacy Feature
 
@@ -30,19 +30,18 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 ## Technology Stack
 
-* **Backend:**
-  * [Node.js](https://nodejs.org/) - JavaScript runtime environment
-  * [Express.js](https://expressjs.com/) - Web application framework for Node.js
-  * [ws](https://github.com/websockets/ws) - WebSocket library for Node.js
-  * [uuid](https://github.com/uuidjs/uuid) - For generating UUID v4 room IDs
-  * [multer](https://github.com/expressjs/multer) - For handling file uploads
-  * [sharp](https://github.com/lovell/sharp) - For image processing, compression, and metadata stripping
-  * [rate-limiter-flexible](https://github.com/animir/node-rate-limiter-flexible) - For upload rate limiting
-* **Frontend:**
-  * HTML5, CSS3, JavaScript (ES6+)
-  * [qrcodejs](https://github.com/davidshimjs/qrcodejs) (via CDN) - For client-side QR code generation
-* **Templating:**
-  * [EJS](https://ejs.co/) - Embedded JavaScript templates
+- **Backend:**
+  - [Node.js](https://nodejs.org/) - JavaScript runtime environment
+  - [Express.js](https://expressjs.com/) - Web application framework for Node.js
+  - [ws](https://github.com/websockets/ws) - WebSocket library for Node.js
+  - [uuid](https://github.com/uuidjs/uuid) - For generating UUID v4 room IDs
+  - [sharp](https://github.com/lovell/sharp) - For image processing, compression, and metadata stripping
+  - [rate-limiter-flexible](https://github.com/animir/node-rate-limiter-flexible) - For upload rate limiting
+- **Frontend:**
+  - HTML5, CSS3, JavaScript (ES6+)
+  - [qrcodejs](https://github.com/davidshimjs/qrcodejs) (via CDN) - For client-side QR code generation
+- **Templating:**
+  - [EJS](https://ejs.co/) - Embedded JavaScript templates
 
 ## Installation
 
@@ -95,10 +94,10 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 ## Privacy Considerations
 
-* **Temporary Image Storage:** Images are stored temporarily on the server filesystem for the duration of the room or up to 15 minutes, then deleted. Images are not stored permanently.
-* **IP Address Visibility:**  For transparency, the application displays the IP addresses of all connected users in the room to each other. Please be aware of this if you have privacy concerns about sharing your IP address with others in the room. This is a necessary part of the user presence feature in this minimalist design.
-* **No Persistent Text/Data Storage:**  The application is designed to be stateless for text and user presence. No text content, images, or user data is stored on the server persistently.  Data exists only in memory (for text) or temporarily on disk (for images) during active sessions.
-* **HTTPS Recommendation:** For enhanced security and privacy, it is strongly recommended to deploy this application with HTTPS enabled to encrypt communication between clients and the server.
+- **Temporary Image Storage:** Images are stored temporarily on the server filesystem for the duration of the room or up to 15 minutes, then deleted. Images are not stored permanently.
+- **IP Address Visibility:**  For transparency, the application displays the IP addresses of all connected users in the room to each other. Please be aware of this if you have privacy concerns about sharing your IP address with others in the room. This is a necessary part of the user presence feature in this minimalist design.
+- **No Persistent Text/Data Storage:**  The application is designed to be stateless for text and user presence. No text content, images, or user data is stored on the server persistently.  Data exists only in memory (for text) or temporarily on disk (for images) during active sessions.
+- **HTTPS Recommendation:** For enhanced security and privacy, it is strongly recommended to deploy this application with HTTPS enabled to encrypt communication between clients and the server.
 
 ---
 
