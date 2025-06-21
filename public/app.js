@@ -343,11 +343,43 @@ async function uploadImage(file) {
   isUploading = false;
   currentUploadFilename = null;
 }
+
+// Max image upload size in bytes (10MB)
+const MAX_IMAGE_UPLOAD_SIZE = 10 * 1024 * 1024;
+
+function showUploadError(msg) {
+  uploadStatus.style.display = "block";
+  uploadStatus.textContent = msg;
+  uploadStatus.style.background = "#f8d7da";
+  uploadStatus.style.color = "#a94442";
+  uploadStatus.style.border = "1px solid #a94442";
+  uploadStatus.style.fontWeight = "bold";
+  setTimeout(() => {
+    uploadStatus.style.display = "none";
+    uploadStatus.style.background = "";
+    uploadStatus.style.color = "";
+    uploadStatus.style.border = "";
+    uploadStatus.style.fontWeight = "";
+  }, 4000);
+}
+
+function handleFileUpload(file) {
+  if (file.size > MAX_IMAGE_UPLOAD_SIZE) {
+    showUploadError(
+      `File too large. Max allowed is ${Math.floor(
+        MAX_IMAGE_UPLOAD_SIZE / 1024 / 1024
+      )}MB.`
+    );
+    return;
+  }
+  uploadImage(file);
+}
+
 selectImageBtn.addEventListener("click", () => imageInput.click());
 
 imageInput.addEventListener("change", (e) => {
   if (e.target.files && e.target.files[0]) {
-    uploadImage(e.target.files[0]);
+    handleFileUpload(e.target.files[0]);
   }
 });
 
@@ -355,7 +387,7 @@ dropArea.addEventListener("drop", (e) => {
   e.preventDefault();
   dropArea.classList.remove("dragover");
   if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-    uploadImage(e.dataTransfer.files[0]);
+    handleFileUpload(e.dataTransfer.files[0]);
   }
 });
 
