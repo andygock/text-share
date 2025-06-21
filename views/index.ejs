@@ -52,27 +52,13 @@
           </div>
         </form>
         <!-- Upload status indicator -->
-        <div
-          id="uploadStatus"
-          style="display: none; margin: 0.5rem 0; text-align: center"
-        ></div>
-        <div
-          id="uploadError"
-          style="
-            display: none;
-            margin: 0.5rem 0;
-            text-align: center;
-            background: #f8d7da;
-            color: #a94442;
-            border: 1px solid #a94442;
-            font-weight: bold;
-          "
-        ></div>
+        <div id="uploadStatus" class="upload-status"></div>
+        <div id="uploadError" class="upload-error"></div>
         <progress
           id="uploadProgressBar"
+          class="upload-progress-bar"
           max="100"
           value="0"
-          style="display: none; width: 60%"
         ></progress>
         <div id="sharedImages"></div>
       </div>

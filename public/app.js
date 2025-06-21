@@ -16,9 +16,9 @@ const selectImageBtn = document.getElementById("selectImageBtn");
 const dropArea = document.getElementById("dropArea");
 const sharedImages = document.getElementById("sharedImages");
 
-let uploadStatus = document.getElementById("uploadStatus");
-let uploadError = document.getElementById("uploadError");
-let uploadProgressBar = document.getElementById("uploadProgressBar");
+const uploadStatus = document.getElementById("uploadStatus");
+const uploadError = document.getElementById("uploadError");
+const uploadProgressBar = document.getElementById("uploadProgressBar");
 
 // --- Room and WebSocket Setup ---
 const roomId = window.ROOM_ID;
@@ -356,18 +356,13 @@ function showUploadError(msg) {
 function setUploadStatus({ text = "", show = false } = {}) {
   uploadStatus.textContent = text;
   uploadStatus.style.display = show && text ? "block" : "none";
-  // Always clear any error styles
-  uploadStatus.style.background = "";
-  uploadStatus.style.color = "";
-  uploadStatus.style.border = "";
-  uploadStatus.style.fontWeight = "";
 }
 
 function setUploadError({ text = "", show = false, timeout = 2000 } = {}) {
   uploadError.textContent = text;
   uploadError.style.display = show && text ? "block" : "none";
   if (show && text) {
-    setUploadStatus({ text: "", show: false }); // Hide status when error
+    setUploadStatus({ text: "", show: false });
     setTimeout(() => {
       uploadError.style.display = "none";
       uploadError.textContent = "";
