@@ -17,43 +17,8 @@ const dropArea = document.getElementById("dropArea");
 const sharedImages = document.getElementById("sharedImages");
 
 let uploadStatus = document.getElementById("uploadStatus");
-if (!uploadStatus) {
-  uploadStatus = document.createElement("div");
-  uploadStatus.id = "uploadStatus";
-  uploadStatus.style.display = "none";
-  uploadStatus.style.margin = "0.5rem 0";
-  uploadStatus.style.textAlign = "center";
-  document
-    .getElementById("image-share")
-    .insertBefore(uploadStatus, sharedImages);
-}
-
 let uploadError = document.getElementById("uploadError");
-if (!uploadError) {
-  uploadError = document.createElement("div");
-  uploadError.id = "uploadError";
-  uploadError.style.display = "none";
-  uploadError.style.margin = "0.5rem 0";
-  uploadError.style.textAlign = "center";
-  uploadError.style.background = "#f8d7da";
-  uploadError.style.color = "#a94442";
-  uploadError.style.border = "1px solid #a94442";
-  uploadError.style.fontWeight = "bold";
-  document
-    .getElementById("image-share")
-    .insertBefore(uploadError, uploadStatus.nextSibling);
-}
-
 let uploadProgressBar = document.getElementById("uploadProgressBar");
-if (!uploadProgressBar) {
-  uploadProgressBar = document.createElement("progress");
-  uploadProgressBar.id = "uploadProgressBar";
-  uploadProgressBar.max = 100;
-  uploadProgressBar.value = 0;
-  uploadProgressBar.style.display = "none";
-  uploadProgressBar.style.width = "60%";
-  uploadStatus.appendChild(uploadProgressBar);
-}
 
 // --- Room and WebSocket Setup ---
 const roomId = window.ROOM_ID;
@@ -255,8 +220,10 @@ websocket.onmessage = (event) => {
       incomingTotalChunks = 0;
       incomingFilename = message.filename;
       incomingMimeType = message.mimeType;
-      uploadStatus.style.display = "block";
-      uploadStatus.textContent = `Receiving image: ${incomingFilename}`;
+      setUploadStatus({
+        text: `Receiving image: ${incomingFilename}`,
+        show: true,
+      });
       break;
     case "imageUploadChunk":
       // Protocol: Step 2/4 (see protocol doc)
@@ -271,7 +238,10 @@ websocket.onmessage = (event) => {
         message.filename === incomingFilename &&
         (!isUploading || message.filename !== currentUploadFilename)
       ) {
-        uploadStatus.textContent = `Receiving... ${message.progress}%`;
+        setUploadStatus({
+          text: `Receiving... ${message.progress}%`,
+          show: true,
+        });
       }
       break;
     case "imageUploadComplete":
@@ -295,8 +265,8 @@ websocket.onmessage = (event) => {
       wrapper.appendChild(img);
       wrapper.appendChild(info);
       sharedImages.appendChild(wrapper);
-      uploadStatus.textContent = "Image received.";
-      setTimeout(() => (uploadStatus.style.display = "none"), 2000);
+      setUploadStatus({ text: "Image received.", show: true });
+      setTimeout(() => setUploadStatus({ text: "", show: false }), 2000);
       incomingImage = null;
       incomingChunks = [];
       incomingTotalChunks = 0;
@@ -306,7 +276,10 @@ websocket.onmessage = (event) => {
     case "imageUploadError":
       // Protocol: Step 7 (see protocol doc)
       console.log("Image upload error:", message.error);
-      showUploadError(`Error uploading image: ${message.error}`);
+      setUploadError({
+        text: `Error uploading image: ${message.error}`,
+        show: true,
+      });
       break;
   }
 };
@@ -323,8 +296,7 @@ function splitBase64IntoChunks(base64, chunkSize) {
 async function uploadImage(file) {
   isUploading = true;
   currentUploadFilename = file.name;
-  uploadStatus.style.display = "block";
-  uploadStatus.textContent = "Processing image...";
+  setUploadStatus({ text: "Processing image...", show: true });
   const arrayBuffer = await file.arrayBuffer();
   websocket.send(
     JSON.stringify({
@@ -352,16 +324,11 @@ async function uploadImage(file) {
         data: chunks[i],
       })
     );
-
-    // don't update uploadStatus if we are in error state
     if (uploadError.style.display === "block") {
       continue;
     }
-
-    // Update upload status with percentage
     const percent = Math.round(((i + 1) / chunks.length) * 100);
-    uploadStatus.textContent = `Uploading... ${percent}%`;
-    // console.log(`Uploaded chunk ${i + 1}/${chunks.length} (${percent}%)`);
+    setUploadStatus({ text: `Uploading... ${percent}%`, show: true });
     await new Promise((r) => setTimeout(r, 10));
   }
   isUploading = false;
@@ -385,6 +352,29 @@ function showUploadError(msg) {
   }, 2000);
 }
 
+// --- Upload Status & Error Handling Utilities ---
+function setUploadStatus({ text = "", show = false } = {}) {
+  uploadStatus.textContent = text;
+  uploadStatus.style.display = show && text ? "block" : "none";
+  // Always clear any error styles
+  uploadStatus.style.background = "";
+  uploadStatus.style.color = "";
+  uploadStatus.style.border = "";
+  uploadStatus.style.fontWeight = "";
+}
+
+function setUploadError({ text = "", show = false, timeout = 2000 } = {}) {
+  uploadError.textContent = text;
+  uploadError.style.display = show && text ? "block" : "none";
+  if (show && text) {
+    setUploadStatus({ text: "", show: false }); // Hide status when error
+    setTimeout(() => {
+      uploadError.style.display = "none";
+      uploadError.textContent = "";
+    }, timeout);
+  }
+}
+
 // Remove error styling from uploadStatus if present
 function clearUploadStatusStyles() {
   uploadStatus.style.background = "";
@@ -395,12 +385,12 @@ function clearUploadStatusStyles() {
 
 function handleFileUpload(file) {
   if (file.size > MAX_IMAGE_UPLOAD_SIZE) {
-    // show error before it gets uploaded to server with WS
-    showUploadError(
-      `File too large. Max allowed is ${Math.floor(
+    setUploadError({
+      text: `File too large. Max allowed is ${Math.floor(
         MAX_IMAGE_UPLOAD_SIZE / 1024 / 1024
-      )}MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB.`
-    );
+      )}MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB.`,
+      show: true,
+    });
     return;
   }
   uploadImage(file);
