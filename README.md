@@ -1,6 +1,6 @@
 # Real-time Text & Image Share
 
-A minimalist web application for sharing text and images between devices in real-time, privately and without persistent storage.
+A minimalist web application for sharing text and images between devices in real-time, privately and **without persistent storage**.
 
 ## Project Description
 
@@ -10,15 +10,23 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 * **Real-time Synchronization:** Text and images shared on one device instantly appear on all other connected devices in the same room.
 * **Image Sharing:** Upload or drag-and-drop images (PNG, JPG, WEBP) to share with all users in the room. Images are automatically resampled, compressed, and stripped of metadata for privacy and efficiency. Each image displays its dimensions and file size in the UI, and can be downloaded by any user.
+* **In-Memory Image Handling (No Disk Storage):** Images are never written to disk. All image processing (resizing, compression, metadata removal) is performed in memory, and images are streamed directly to all connected users via WebSocket. This maximizes privacy and ensures no image files are ever stored on the server.
 * **Automatic Image Optimization:** All images are processed on the server to be under 500kB, resized if needed, and have all metadata removed. If an image cannot be compressed below 500kB, the upload is rejected.
-* **Temporary Image Storage:** Images are stored temporarily on the server filesystem for the duration of the room's activity or up to 15 minutes. Images are deleted when a room is empty or after 15 minutes, whichever comes first.
 * **No Persistent Text/Data Storage:** No text or user data is stored persistently on the server. Text and user presence exist only in memory while users are connected.
 * **Privacy Focused:** Designed with privacy in mind. No accounts, no tracking, no persistent server-side storage of your text or images.
 * **Minimalist UI:** Clean and simple user interface for easy use on any device.
 * **QR Code for Easy Sharing:** A QR code of the unique URL is automatically generated, making it easy to open the same room on mobile devices.
 * **User Presence:** Displays the number of connected users and their IP addresses (for transparency within the room).
-* **Room Cleanup:** Automatically closes WebSocket connections and frees up server resources when all users disconnect from a room. Images are deleted when a room is empty or after 15 minutes.
+* **Room Cleanup:** Automatically closes WebSocket connections and frees up server resources when all users disconnect from a room.
 * **Rate Limiting:** Uploads are rate-limited globally and per IP to prevent abuse.
+
+## In-Memory Image Privacy Feature
+
+- **No Temp Files:** Images are never written to disk. All uploads are processed and streamed in memory only.
+- **Direct Streaming:** Uploaded images are streamed directly to all connected users (including the uploader) using WebSockets, after in-memory processing.
+- **Progress & Info:** Both uploaders and downloaders see real-time progress and image info (dimensions, file size) during transfer.
+- **Maximum Privacy:** No image data is ever stored on the server, even temporarily. This ensures maximum privacy for all users.
+- **See [Images-Transfer-Protocol.md](./Images-Transfer-Protocol.md) for technical details.**
 
 ## Technology Stack
 

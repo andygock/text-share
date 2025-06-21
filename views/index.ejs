@@ -182,9 +182,15 @@
           generateBarcodesButton.disabled = false;
         });
 
-        // receive message from server
+        // receive message from server (single handler for all message types)
         websocket.onmessage = (event) => {
-          const message = JSON.parse(event.data);
+          let message;
+          try {
+            message = JSON.parse(event.data);
+          } catch {
+            // Not JSON, ignore
+            return;
+          }
           if (message.type === "textUpdate") {
             sharedTextarea.value = message.text;
             updateHash(message.text);
@@ -195,6 +201,53 @@
             addUser(message.ip);
           } else if (message.type === "userDisconnected") {
             removeUser(message.ip);
+          } else if (message.type === "imageUploadStart") {
+            incomingImage = null;
+            incomingChunks = [];
+            incomingTotalChunks = 0;
+            incomingFilename = message.filename;
+            incomingMimeType = message.mimeType;
+            uploadStatus.style.display = "block";
+            uploadStatus.textContent = `Receiving image: ${incomingFilename}`;
+          } else if (message.type === "imageUploadChunk") {
+            if (message.filename !== incomingFilename) return;
+            incomingChunks[message.chunkIndex] = message.data;
+            incomingTotalChunks = message.totalChunks;
+          } else if (message.type === "imageUploadProgress") {
+            if (message.filename === incomingFilename) {
+              uploadStatus.textContent = `Receiving... ${message.progress}%`;
+            }
+          } else if (message.type === "imageUploadComplete") {
+            if (message.filename !== incomingFilename) return;
+            // Use processed image data
+            const base64 = message.data;
+            const img = document.createElement("img");
+            img.src = `data:${message.mimeType};base64,${base64}`;
+            img.alt = message.filename;
+            img.title = `${message.filename} (${message.width}x${
+              message.height
+            }, ${Math.ceil(message.size / 1024)}kB)`;
+            img.style.maxWidth = "100%";
+            img.style.maxHeight = "300px";
+            const info = document.createElement("div");
+            info.textContent = `${message.filename} (${message.width}x${
+              message.height
+            }, ${Math.ceil(message.size / 1024)}kB)`;
+            const wrapper = document.createElement("div");
+            wrapper.className = "shared-image-item";
+            wrapper.appendChild(img);
+            wrapper.appendChild(info);
+            sharedImages.appendChild(wrapper);
+            uploadStatus.textContent = "Image received.";
+            setTimeout(() => (uploadStatus.style.display = "none"), 2000);
+            incomingImage = null;
+            incomingChunks = [];
+            incomingTotalChunks = 0;
+            incomingFilename = "";
+            incomingMimeType = "";
+          } else if (message.type === "imageUploadError") {
+            uploadStatus.textContent = `Error: ${message.error}`;
+            setTimeout(() => (uploadStatus.style.display = "none"), 3000);
           }
         };
 
@@ -277,35 +330,7 @@
         const imageInput = document.getElementById("imageInput");
         const selectImageBtn = document.getElementById("selectImageBtn");
         const dropArea = document.getElementById("dropArea");
-        const imageUploadForm = document.getElementById("imageUploadForm");
         const sharedImages = document.getElementById("sharedImages");
-
-        // Prevent default drag behaviors
-        ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
-          dropArea.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          });
-        });
-        dropArea.addEventListener("dragover", () =>
-          dropArea.classList.add("dragover")
-        );
-        dropArea.addEventListener("dragleave", () =>
-          dropArea.classList.remove("dragover")
-        );
-        dropArea.addEventListener("drop", (e) => {
-          dropArea.classList.remove("dragover");
-          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            uploadImage(e.dataTransfer.files[0]);
-          }
-        });
-        selectImageBtn.addEventListener("click", () => imageInput.click());
-        imageInput.addEventListener("change", (e) => {
-          if (e.target.files && e.target.files[0]) {
-            uploadImage(e.target.files[0]);
-          }
-        });
-        // Upload feedback indicator
         let uploadStatus = document.getElementById("uploadStatus");
         if (!uploadStatus) {
           uploadStatus = document.createElement("div");
@@ -328,103 +353,87 @@
           uploadStatus.appendChild(uploadProgressBar);
         }
 
+        // --- Image sharing logic via WebSocket ---
+        // Use only one declaration for each DOM element at the top scope
+        // These are already declared above, so just use them here
+        // const imageInput = document.getElementById("imageInput");
+        // const selectImageBtn = document.getElementById("selectImageBtn");
+        // const dropArea = document.getElementById("dropArea");
+        // const sharedImages = document.getElementById("sharedImages");
+        // const uploadStatus = document.getElementById("uploadStatus");
+
+        // Helper: split buffer into base64 chunks
+        function splitBase64IntoChunks(base64, chunkSize) {
+          const chunks = [];
+          for (let i = 0; i < base64.length; i += chunkSize) {
+            chunks.push(base64.slice(i, i + chunkSize));
+          }
+          return chunks;
+        }
+
+        // Upload image via WebSocket
         async function uploadImage(file) {
-          const allowed = ["image/png", "image/jpeg", "image/webp"];
-          if (!allowed.includes(file.type)) {
-            alert("Only PNG, JPG, and WEBP images are allowed.");
-            return;
-          }
-          const formData = new FormData();
-          formData.append("image", file);
-          uploadStatus.textContent = "Uploading...";
           uploadStatus.style.display = "block";
-          uploadProgressBar.value = 0;
-          uploadProgressBar.style.display = "inline-block";
-
-          // Use XMLHttpRequest for real upload progress
-          const xhr = new XMLHttpRequest();
-          xhr.open("POST", `/${roomId}/upload`);
-
-          xhr.upload.onprogress = function (e) {
-            if (e.lengthComputable) {
-              const percent = Math.round((e.loaded / e.total) * 100);
-              uploadProgressBar.value = percent;
-              uploadStatus.textContent = `Uploading... ${percent}%`;
-            }
-          };
-
-          xhr.onload = function () {
-            uploadProgressBar.style.display = "none";
-            let data;
-            try {
-              data = JSON.parse(xhr.responseText);
-            } catch {
-              uploadStatus.textContent = "Upload failed.";
-              setTimeout(() => (uploadStatus.style.display = "none"), 3000);
-              return;
-            }
-            if (xhr.status < 200 || xhr.status >= 300) {
-              if (data && data.error) {
-                uploadStatus.textContent = "Error: " + data.error;
-              } else {
-                uploadStatus.textContent = "Upload failed.";
-              }
-              setTimeout(() => (uploadStatus.style.display = "none"), 3000);
-              return;
-            }
-            uploadStatus.textContent = "Upload complete!";
-            setTimeout(() => (uploadStatus.style.display = "none"), 1200);
-            // Do not call addImageToUI here; wait for WebSocket broadcast
-          };
-
-          xhr.onerror = function () {
-            uploadProgressBar.style.display = "none";
-            uploadStatus.textContent = "Upload failed.";
-            setTimeout(() => (uploadStatus.style.display = "none"), 3000);
-          };
-
-          xhr.send(formData);
-        }
-        function addImageToUI(url, filename, width, height, sizeKB) {
-          const div = document.createElement("div");
-          div.className = "shared-image";
-          const img = document.createElement("img");
-          img.src = url;
-          img.alt = filename;
-          img.loading = "lazy";
-          img.style.maxWidth = "200px";
-          img.style.maxHeight = "200px";
-          const dl = document.createElement("a");
-          dl.href = url;
-          dl.download = filename;
-          dl.textContent = "Download";
-          const info = document.createElement("div");
-          if (width && height && sizeKB) {
-            info.textContent = `${width}x${height}px, ${sizeKB} kB`;
-            info.className = "image-info";
+          uploadStatus.textContent = "Processing image...";
+          // Read file as ArrayBuffer
+          const arrayBuffer = await file.arrayBuffer();
+          // Send start message
+          websocket.send(
+            JSON.stringify({
+              type: "imageUploadStart",
+              filename: file.name,
+              mimeType: file.type,
+              size: file.size,
+            })
+          );
+          // Convert to base64
+          const base64 = btoa(
+            new Uint8Array(arrayBuffer).reduce(
+              (data, byte) => data + String.fromCharCode(byte),
+              ""
+            )
+          );
+          // Chunk size: 32k chars (24kB per chunk)
+          const chunkSize = 32 * 1024;
+          const chunks = splitBase64IntoChunks(base64, chunkSize);
+          for (let i = 0; i < chunks.length; i++) {
+            websocket.send(
+              JSON.stringify({
+                type: "imageUploadChunk",
+                filename: file.name,
+                chunkIndex: i,
+                totalChunks: chunks.length,
+                data: chunks[i],
+              })
+            );
+            // Show progress
+            const percent = Math.round(((i + 1) / chunks.length) * 100);
+            uploadStatus.textContent = `Uploading... ${percent}%`;
+            await new Promise((r) => setTimeout(r, 10)); // allow UI update
           }
-          div.appendChild(img);
-          div.appendChild(document.createElement("br"));
-          div.appendChild(dl);
-          if (info.textContent) div.appendChild(document.createElement("br"));
-          div.appendChild(info);
-          sharedImages.appendChild(div);
         }
-        // Listen for imageUpload events from WebSocket
-        websocket.addEventListener("message", (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            if (message.type === "imageUpload") {
-              addImageToUI(
-                message.url,
-                message.filename,
-                message.width,
-                message.height,
-                message.sizeKB
-              );
-            }
-          } catch {}
+
+        // Handle file input
+        selectImageBtn.addEventListener("click", () => imageInput.click());
+        imageInput.addEventListener("change", (e) => {
+          if (e.target.files && e.target.files[0]) {
+            uploadImage(e.target.files[0]);
+          }
         });
+        dropArea.addEventListener("drop", (e) => {
+          e.preventDefault();
+          dropArea.classList.remove("dragover");
+          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            uploadImage(e.dataTransfer.files[0]);
+          }
+        });
+        dropArea.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          dropArea.classList.add("dragover");
+        });
+        dropArea.addEventListener("dragleave", () =>
+          dropArea.classList.remove("dragover")
+        );
 
         websocket.onopen = () => {
           console.log("WebSocket connection opened");

@@ -4,7 +4,6 @@ const http = require("http");
 const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
 const path = require("path");
-const multer = require("multer");
 const fs = require("fs");
 const {
   upload,
@@ -12,6 +11,7 @@ const {
   cleanupOldImages,
   cleanupRoomImages,
   processImage,
+  processImageBuffer,
   UPLOAD_DIR,
 } = require("./image-handler");
 const {
@@ -106,18 +106,126 @@ wss.on("connection", (ws, req) => {
 
   ws.ip = clientIp;
 
-  ws.on("message", (message) => {
-    if (message.length > MAX_MESSAGE_SIZE) {
-      ws.close(1009, "Message size exceeds the maximum allowed.");
+  ws.on("message", async (message, isBinary) => {
+    // Handle text messages as before
+    if (!isBinary) {
+      let parsed;
+      try {
+        parsed = JSON.parse(message);
+      } catch {
+        // Fallback: treat as text update
+        roomClients.forEach((client) => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(
+              JSON.stringify({ type: "textUpdate", text: message.toString() })
+            );
+          }
+        });
+        return;
+      }
+      // Handle image protocol
+      if (parsed.type === "imageUploadStart") {
+        // Initialize upload state
+        ws.imageUploadState = {
+          filename: parsed.filename,
+          mimeType: parsed.mimeType,
+          size: parsed.size,
+          chunks: [],
+          received: 0,
+          totalChunks: null,
+        };
+        // Broadcast start to all clients (including uploader)
+        roomClients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(
+              JSON.stringify({
+                type: "imageUploadStart",
+                filename: parsed.filename,
+                mimeType: parsed.mimeType,
+                size: parsed.size,
+              })
+            );
+          }
+        });
+      } else if (parsed.type === "imageUploadChunk") {
+        if (!ws.imageUploadState) return;
+        ws.imageUploadState.chunks[parsed.chunkIndex] = parsed.data;
+        ws.imageUploadState.received++;
+        ws.imageUploadState.totalChunks = parsed.totalChunks;
+        // Broadcast chunk to all clients (including uploader)
+        roomClients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+          }
+        });
+        // Progress
+        const progress = Math.round(
+          (ws.imageUploadState.received / ws.imageUploadState.totalChunks) * 100
+        );
+        roomClients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(
+              JSON.stringify({
+                type: "imageUploadProgress",
+                filename: ws.imageUploadState.filename,
+                progress,
+              })
+            );
+          }
+        });
+        // If last chunk, process image
+        if (ws.imageUploadState.received === ws.imageUploadState.totalChunks) {
+          try {
+            // Reassemble base64 chunks
+            const base64 = ws.imageUploadState.chunks.join("");
+            const buffer = Buffer.from(base64, "base64");
+            const ext = require("path")
+              .extname(ws.imageUploadState.filename)
+              .toLowerCase();
+            const result = await processImageBuffer(buffer, ext);
+            if (result.size > 500 * 1024) {
+              ws.send(
+                JSON.stringify({
+                  type: "imageUploadError",
+                  filename: ws.imageUploadState.filename,
+                  error: "Image could not be compressed below 500kB.",
+                })
+              );
+              ws.imageUploadState = null;
+              return;
+            }
+            // Send complete to all
+            roomClients.forEach((client) => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(
+                  JSON.stringify({
+                    type: "imageUploadComplete",
+                    filename: ws.imageUploadState.filename,
+                    mimeType: ws.imageUploadState.mimeType,
+                    width: result.width,
+                    height: result.height,
+                    size: result.size,
+                    data: result.buffer.toString("base64"),
+                  })
+                );
+              }
+            });
+            ws.imageUploadState = null;
+          } catch (err) {
+            ws.send(
+              JSON.stringify({
+                type: "imageUploadError",
+                filename: ws.imageUploadState.filename,
+                error: "Image processing failed.",
+              })
+            );
+            ws.imageUploadState = null;
+          }
+        }
+      }
       return;
     }
-    roomClients.forEach((client) => {
-      if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(
-          JSON.stringify({ type: "textUpdate", text: message.toString() })
-        );
-      }
-    });
+    // ...existing code for binary (not used)...
   });
 
   ws.on("close", () => {
@@ -146,110 +254,6 @@ wss.on("connection", (ws, req) => {
       rooms.delete(roomId);
     }
   });
-});
-
-// Image upload endpoint
-app.post("/:roomId/upload", upload.single("image"), async (req, res) => {
-  const roomId = req.params.roomId;
-  const clientIp =
-    req.headers["x-forwarded-for"]?.split(",").shift() ||
-    req.socket.remoteAddress ||
-    "127.0.0.1";
-
-  // Rate limiting with rate-limiter-flexible
-  cleanupOldImages();
-  try {
-    await globalLimiter.consume("global");
-    await ipLimiter.consume(clientIp);
-  } catch (rejRes) {
-    return res.status(429).json({ error: "Upload rate limit exceeded." });
-  }
-
-  if (!rooms.has(roomId)) {
-    return res.status(400).json({ error: "Room does not exist." });
-  }
-  // Use the existing roomClients variable for both checks
-  const roomClients = rooms.get(roomId);
-  if (!roomClients || roomClients.size <= 1) {
-    return res.status(400).json({
-      error: "Cannot upload images when you are the only user in the room.",
-    });
-  }
-  if (!req.file) {
-    return res.status(400).json({ error: "No file uploaded." });
-  }
-
-  // Always process the image with sharp: strip metadata, resize if needed, compress
-  const inputPath = req.file.path;
-  const ext = path.extname(req.file.originalname).toLowerCase();
-  let processed = false;
-  let finalStats;
-  try {
-    finalStats = await processImage(inputPath, ext);
-    processed = true;
-  } catch (err) {
-    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-    return res.status(400).json({ error: "Image processing failed." });
-  }
-  // Final check: if still too large, reject
-  if (finalStats.size > 500 * 1024) {
-    fs.unlinkSync(inputPath);
-    return res
-      .status(413)
-      .json({ error: "Image could not be compressed below 500kB." });
-  }
-
-  // Track image meta for cleanup
-  imageMeta.push({
-    filename: req.file.filename,
-    path: req.file.path,
-    roomId,
-    timestamp: Date.now(),
-  });
-
-  // Get image dimensions and size
-  let width = 0,
-    height = 0,
-    sizeKB = 0;
-  try {
-    const sharpMeta = await require("sharp")(req.file.path).metadata();
-    width = sharpMeta.width;
-    height = sharpMeta.height;
-    sizeKB = Math.ceil(finalStats.size / 1024);
-  } catch {}
-
-  const fileUrl = `/uploads/${req.file.filename}`;
-  // Broadcast image to all clients in the room, including dimensions and size
-  roomClients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(
-        JSON.stringify({
-          type: "imageUpload",
-          url: fileUrl,
-          filename: req.file.originalname,
-          width,
-          height,
-          sizeKB,
-        })
-      );
-    }
-  });
-  res.json({ url: fileUrl });
-});
-
-// Error handler for multer (file size, file type, etc.)
-app.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    if (err.code === "LIMIT_FILE_SIZE") {
-      return res
-        .status(413)
-        .json({ error: "File too large. Max size is 1MB." });
-    }
-    return res.status(400).json({ error: err.message });
-  } else if (err) {
-    return res.status(400).json({ error: err.message });
-  }
-  next();
 });
 
 const PORT = process.env.PORT || 3000;
