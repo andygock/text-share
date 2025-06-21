@@ -18,7 +18,7 @@
 
 body {
   font-family: sans-serif;
-  margin: 2rem;
+  margin: 0.5rem;
   background-color: var(--bg);
   color: #333;
   display: flex;
@@ -32,9 +32,8 @@ body {
   padding: var(--padding);
   border-radius: var(--border-radius);
   box-shadow: var(--box-shadow);
-  text-align: center;
-  width: 80%;
-  max-width: 50rem;
+  width: 100%;
+  max-width: 1024px;
 }
 
 h1,
@@ -42,6 +41,8 @@ h2 {
   margin-top: 0;
   margin-bottom: 0.5rem;
   color: #555;
+  font-size: 120%;
+  text-align: left;
 }
 
 #top {
@@ -57,23 +58,50 @@ h2 {
   z-index: 1100;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: center;
   gap: 1rem;
   background: rgba(255, 255, 255, 0.85);
-  border-radius: var(--border-radius);
   padding: 0.5rem;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
-  padding-top: 1rem;
+}
+
+.new-room {
+  margin-bottom: 0.5rem;
+  font-size: var(--font-size-small);
 }
 
 #top-left-controls #qrcode {
   margin: 0 auto;
 }
 
+/* if under 600px wide, hide the qr code */
+@media (max-width: 520px) {
+  #top-left-controls #qrcode {
+    display: none;
+  }
+}
+
+button {
+  background-color: var(--primary);
+  color: white;
+  padding: 0.5rem;
+  margin: 0.5rem;
+  border: none;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  font-size: var(--font-size);
+  box-shadow: var(--box-shadow);
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+button:hover {
+  background-color: var(--primary-dark);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
 footer {
   text-align: center;
-  margin-top: 2rem;
+  margin-top: 1rem;
 }
 
 a {
@@ -117,6 +145,8 @@ textarea {
 }
 
 .users-info {
+  margin: 0.5rem 0;
+  font-size: small;
   text-align: left;
   padding: 1rem;
   border: 1px solid #eee;
@@ -149,7 +179,7 @@ textarea {
 
 .barcodes {
   margin-top: 0.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -170,7 +200,7 @@ textarea {
 }
 
 #image-share {
-  margin: 1rem 0;
+  /* margin: 1rem 0; */
   padding: 1rem;
   border: var(--border);
   border-radius: var(--border-radius);

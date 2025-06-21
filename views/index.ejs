@@ -59,11 +59,14 @@
     <div class="container">
       <div id="top">
         <div id="top-left-controls">
-          <div><a href="/" class="button">New Room</a></div>
           <div id="qrcode"></div>
         </div>
         <div id="text-content">
-          <h1>Real-time Text & Image Share</h1>
+          <h1>
+            Real-time Text & Image Share
+            <button class="new-room">New Room</button>
+          </h1>
+
           <textarea
             id="sharedText"
             placeholder="Start typing to share..."
@@ -114,11 +117,11 @@
       </div>
 
       <div class="users-info">
-        <p>Connected Users: <span id="userCount">0</span></p>
+        <div>
+          Your IP address will be visible to other users in this room. Connected
+          users: <span id="userCount">0</span>.
+        </div>
         <ul id="userList"></ul>
-        <p class="privacy-note">
-          Your IP address will be visible to other users in this room.
-        </p>
       </div>
       <footer class="footer">
         <p>
@@ -129,7 +132,7 @@
       </footer>
     </div>
     <div id="userCountSticky">
-      Users: <span id="userCountStickyNum">0</span>
+      <div id="users">Users: <span id="userCountStickyNum">0</span></div>
     </div>
 
     <script>

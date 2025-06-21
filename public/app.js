@@ -32,8 +32,8 @@ const websocket = new WebSocket(
 const currentUrl = window.location.href;
 new QRCode(qrcodeDiv, {
   text: currentUrl,
-  width: 72,
-  height: 72,
+  width: 64,
+  height: 64,
   colorDark: "#000",
   colorLight: "#fff",
   correctLevel: QRCode.CorrectLevel.M,
@@ -510,3 +510,11 @@ websocket.onerror = (error) => {
 
 // --- Initial State ---
 setImageUploadEnabled(false);
+
+// new room button, just redirects to the home page again
+document.querySelectorAll(".new-room").forEach((btn) => {
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    window.location.href = "/";
+  });
+});
