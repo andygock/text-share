@@ -44,9 +44,10 @@ h2 {
   color: #555;
 }
 
-#header {
+#top {
   display: flex;
   justify-content: space-between;
+  gap: 1rem;
 }
 
 footer {
@@ -271,4 +272,8 @@ textarea {
   #generate-barcodes {
     font-size: 0.6rem;
   }
+}
+
+#text-content {
+  flex: 1;
 }
