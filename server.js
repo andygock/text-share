@@ -44,7 +44,7 @@ app.get("/:roomId", (req, res) => {
   ) {
     return res.status(400).send("Invalid room ID format.");
   }
-  res.render("index", { roomId });
+  res.render("index", { roomId, maxImageUploadSize: MAX_IMAGE_UPLOAD_SIZE });
 });
 
 wss.on("connection", (ws, req) => {

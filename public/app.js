@@ -335,8 +335,8 @@ async function uploadImage(file) {
   currentUploadFilename = null;
 }
 
-// Max image upload size in bytes (10MB)
-const MAX_IMAGE_UPLOAD_SIZE = 10 * 1024 * 1024;
+// Max image upload size in bytes (from backend, fallback 10MB)
+const MAX_IMAGE_UPLOAD_SIZE = window.MAX_IMAGE_UPLOAD_SIZE || 10 * 1024 * 1024;
 
 function showUploadError(msg) {
   uploadError.style.display = "block";

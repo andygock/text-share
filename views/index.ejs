@@ -83,6 +83,8 @@
 
     <script>
       window.ROOM_ID = "<%= roomId %>";
+      window.MAX_IMAGE_UPLOAD_SIZE =
+        Number("<%= maxImageUploadSize %>") || 10485760;
     </script>
     <script src="/app.js"></script>
   </body>
