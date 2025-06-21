@@ -6,7 +6,7 @@
   --danger-text: #a94442;
   --border-radius: 0.5rem;
   --box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  --padding: 2rem;
+  --padding: 1rem;
   --font-size: 1rem;
   --font-size-small: 0.8rem;
   --font-size-xsmall: 0.7rem;
@@ -46,8 +46,29 @@ h2 {
 
 #top {
   display: flex;
-  justify-content: space-between;
   gap: 1rem;
+}
+
+#top-left-controls {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  left: auto;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1rem;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: var(--border-radius);
+  padding: 0.5rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
+  padding-top: 1rem;
+}
+
+#top-left-controls #qrcode {
+  margin: 0 auto;
 }
 
 footer {
@@ -63,7 +84,7 @@ a {
 .button {
   background-color: var(--primary);
   color: white;
-  padding: 0.6rem 1.2rem;
+  padding: 0.5rem 0.5rem;
   border: none;
   border-radius: var(--border-radius);
   cursor: pointer;
@@ -267,16 +288,6 @@ textarea {
 .upload-progress-bar {
   display: none;
   width: 60%;
-}
-
-@media (max-width: 600px) {
-  .container {
-    padding: 1rem;
-    width: 98%;
-  }
-  #generate-barcodes {
-    font-size: 0.6rem;
-  }
 }
 
 #text-content {

@@ -32,11 +32,11 @@ const websocket = new WebSocket(
 const currentUrl = window.location.href;
 new QRCode(qrcodeDiv, {
   text: currentUrl,
-  width: 128,
-  height: 128,
+  width: 72,
+  height: 72,
   colorDark: "#000",
   colorLight: "#fff",
-  correctLevel: QRCode.CorrectLevel.H,
+  correctLevel: QRCode.CorrectLevel.M,
 });
 
 // --- Text Sync & Barcode ---
