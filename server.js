@@ -3,9 +3,7 @@ const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
-const path = require("path");
-const fs = require("fs");
-const { processImageBuffer, UPLOAD_DIR } = require("./image-handler");
+const { processImageBuffer } = require("./image-handler");
 const {
   rooms,
   getOrCreateRoom,
@@ -25,24 +23,6 @@ app.use(express.static("public")); // Serve static files from 'public' directory
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-
-// Delete all images in the uploads directory on server start
-fs.readdir(UPLOAD_DIR, (err, files) => {
-  if (err) {
-    console.error("Error reading upload directory:", err);
-    return;
-  }
-  files.forEach((file) => {
-    const filePath = path.join(UPLOAD_DIR, file);
-    fs.unlink(filePath, (err) => {
-      if (err) {
-        console.error(`Error deleting file ${file}:`, err);
-      } else {
-        console.log(`Deleted old image: ${file}`);
-      }
-    });
-  });
-});
 
 app.get("/", (req, res) => {
   const uuid = uuidv4();

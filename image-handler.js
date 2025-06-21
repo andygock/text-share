@@ -1,8 +1,7 @@
 require("dotenv").config();
-const path = require("path");
 const sharp = require("sharp");
 
-const UPLOAD_DIR = path.join(__dirname, "public", "uploads");
+// const UPLOAD_DIR = path.join(__dirname, "public", "uploads");
 
 async function processImageBuffer(inputBuffer, ext) {
   let image = sharp(inputBuffer);
@@ -53,5 +52,4 @@ async function processImageBuffer(inputBuffer, ext) {
 
 module.exports = {
   processImageBuffer,
-  UPLOAD_DIR,
 };
