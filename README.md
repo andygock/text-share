@@ -4,7 +4,7 @@ A minimalist web application for sharing text and images between devices in real
 
 ## Project Description
 
-Real-time Text & Image Share is a simple and privacy-focused web application that allows you to instantly share text and images (PNG, JPG, WEBP) between different devices (desktop, mobile, tablets, etc.). When you open the site, it generates a unique, random URL (using UUID v4). Simply share this URL (e.g., by scanning the QR code) with other devices to create a private, real-time sharing room.
+Real-time Text & Image Share is a simple and privacy-focused web application that allows you to instantly share text and images in PNG, JPG, or WEBP format between different devices such as desktop computers, mobile phones, and tablets. When you open the site, it generates a unique, random URL using UUID v4. Simply share this URL, for example by scanning the QR code, with other devices to create a private, real-time sharing room.
 
 **Key Features:**
 
@@ -91,13 +91,6 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 6. **To end sharing:**
 
     Simply close the browser tab or window on all devices. Once all users disconnect, the room is automatically cleared on the server and all images are deleted.
-
-## Privacy Considerations
-
-- **Temporary Image Storage:** Images are stored temporarily on the server filesystem for the duration of the room or up to 15 minutes, then deleted. Images are not stored permanently.
-- **IP Address Visibility:**  For transparency, the application displays the IP addresses of all connected users in the room to each other. Please be aware of this if you have privacy concerns about sharing your IP address with others in the room. This is a necessary part of the user presence feature in this minimalist design.
-- **No Persistent Text/Data Storage:**  The application is designed to be stateless for text and user presence. No text content, images, or user data is stored on the server persistently.  Data exists only in memory (for text) or temporarily on disk (for images) during active sessions.
-- **HTTPS Recommendation:** For enhanced security and privacy, it is strongly recommended to deploy this application with HTTPS enabled to encrypt communication between clients and the server.
 
 ---
 
