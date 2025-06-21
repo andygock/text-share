@@ -206,6 +206,8 @@ let incomingChunks = [];
 let incomingTotalChunks = 0;
 let incomingFilename = "";
 let incomingMimeType = "";
+let isUploading = false;
+let currentUploadFilename = null;
 
 websocket.onmessage = (event) => {
   let message;
@@ -248,7 +250,11 @@ websocket.onmessage = (event) => {
       break;
     case "imageUploadProgress":
       // Protocol: Step 5 (see protocol doc)
-      if (message.filename === incomingFilename) {
+      // Only show receive progress if not uploading this file
+      if (
+        message.filename === incomingFilename &&
+        (!isUploading || message.filename !== currentUploadFilename)
+      ) {
         uploadStatus.textContent = `Receiving... ${message.progress}%`;
       }
       break;
@@ -299,6 +305,8 @@ function splitBase64IntoChunks(base64, chunkSize) {
 }
 
 async function uploadImage(file) {
+  isUploading = true;
+  currentUploadFilename = file.name;
   uploadStatus.style.display = "block";
   uploadStatus.textContent = "Processing image...";
   const arrayBuffer = await file.arrayBuffer();
@@ -332,6 +340,8 @@ async function uploadImage(file) {
     uploadStatus.textContent = `Uploading... ${percent}%`;
     await new Promise((r) => setTimeout(r, 10));
   }
+  isUploading = false;
+  currentUploadFilename = null;
 }
 selectImageBtn.addEventListener("click", () => imageInput.click());
 
