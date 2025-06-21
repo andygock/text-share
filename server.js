@@ -1,4 +1,5 @@
 // server.js
+require("dotenv").config(); // Load .env variables
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
@@ -23,6 +24,10 @@ app.use(express.static("public")); // Serve static files from 'public' directory
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
+
+// Max image upload size (default 10MB, can override with env var)
+const MAX_IMAGE_UPLOAD_SIZE =
+  parseInt(process.env.MAX_IMAGE_UPLOAD_SIZE_BYTES, 10) || 10 * 1024 * 1024;
 
 app.get("/", (req, res) => {
   const uuid = uuidv4();
@@ -108,6 +113,19 @@ wss.on("connection", (ws, req) => {
               type: "imageUploadError",
               filename: parsed.filename,
               error: "Upload rate limit exceeded. Please try again later.",
+            })
+          );
+          return;
+        }
+        // Check upload size
+        if (parsed.size > MAX_IMAGE_UPLOAD_SIZE) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: `File too large. Max allowed is ${Math.floor(
+                MAX_IMAGE_UPLOAD_SIZE / 1024 / 1024
+              )}MB. Your file is ${(parsed.size / 1024 / 1024).toFixed(2)}MB.`,
             })
           );
           return;

@@ -28,6 +28,22 @@ if (!uploadStatus) {
     .insertBefore(uploadStatus, sharedImages);
 }
 
+let uploadError = document.getElementById("uploadError");
+if (!uploadError) {
+  uploadError = document.createElement("div");
+  uploadError.id = "uploadError";
+  uploadError.style.display = "none";
+  uploadError.style.margin = "0.5rem 0";
+  uploadError.style.textAlign = "center";
+  uploadError.style.background = "#f8d7da";
+  uploadError.style.color = "#a94442";
+  uploadError.style.border = "1px solid #a94442";
+  uploadError.style.fontWeight = "bold";
+  document
+    .getElementById("image-share")
+    .insertBefore(uploadError, uploadStatus.nextSibling);
+}
+
 let uploadProgressBar = document.getElementById("uploadProgressBar");
 if (!uploadProgressBar) {
   uploadProgressBar = document.createElement("progress");
@@ -289,8 +305,8 @@ websocket.onmessage = (event) => {
       break;
     case "imageUploadError":
       // Protocol: Step 7 (see protocol doc)
-      uploadStatus.textContent = `Error: ${message.error}`;
-      setTimeout(() => (uploadStatus.style.display = "none"), 3000);
+      console.log("Image upload error:", message.error);
+      showUploadError(`Error uploading image: ${message.error}`);
       break;
   }
 };
@@ -336,8 +352,16 @@ async function uploadImage(file) {
         data: chunks[i],
       })
     );
+
+    // don't update uploadStatus if we are in error state
+    if (uploadError.style.display === "block") {
+      continue;
+    }
+
+    // Update upload status with percentage
     const percent = Math.round(((i + 1) / chunks.length) * 100);
     uploadStatus.textContent = `Uploading... ${percent}%`;
+    // console.log(`Uploaded chunk ${i + 1}/${chunks.length} (${percent}%)`);
     await new Promise((r) => setTimeout(r, 10));
   }
   isUploading = false;
@@ -348,27 +372,34 @@ async function uploadImage(file) {
 const MAX_IMAGE_UPLOAD_SIZE = 10 * 1024 * 1024;
 
 function showUploadError(msg) {
-  uploadStatus.style.display = "block";
-  uploadStatus.textContent = msg;
-  uploadStatus.style.background = "#f8d7da";
-  uploadStatus.style.color = "#a94442";
-  uploadStatus.style.border = "1px solid #a94442";
-  uploadStatus.style.fontWeight = "bold";
+  uploadError.style.display = "block";
+  uploadError.textContent = msg;
+
+  // clear upload status percentages too as they may be misleading, clear text and styles
+  clearUploadStatusStyles();
+  uploadStatus.textContent = "";
+
   setTimeout(() => {
-    uploadStatus.style.display = "none";
-    uploadStatus.style.background = "";
-    uploadStatus.style.color = "";
-    uploadStatus.style.border = "";
-    uploadStatus.style.fontWeight = "";
-  }, 4000);
+    uploadError.style.display = "none";
+    uploadError.textContent = "";
+  }, 2000);
+}
+
+// Remove error styling from uploadStatus if present
+function clearUploadStatusStyles() {
+  uploadStatus.style.background = "";
+  uploadStatus.style.color = "";
+  uploadStatus.style.border = "";
+  uploadStatus.style.fontWeight = "";
 }
 
 function handleFileUpload(file) {
   if (file.size > MAX_IMAGE_UPLOAD_SIZE) {
+    // show error before it gets uploaded to server with WS
     showUploadError(
       `File too large. Max allowed is ${Math.floor(
         MAX_IMAGE_UPLOAD_SIZE / 1024 / 1024
-      )}MB.`
+      )}MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB.`
     );
     return;
   }
