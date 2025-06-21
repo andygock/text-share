@@ -5,30 +5,18 @@ const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
 const path = require("path");
 const fs = require("fs");
+const { processImageBuffer, UPLOAD_DIR } = require("./image-handler");
 const {
-  upload,
-  imageMeta,
-  cleanupOldImages,
-  cleanupRoomImages,
-  processImage,
-  processImageBuffer,
-  UPLOAD_DIR,
-} = require("./image-handler");
-const {
-  MAX_ROOMS,
-  MAX_CLIENTS_PER_ROOM,
-  MAX_CLIENTS,
-  MAX_CLIENTS_PER_IP,
   rooms,
-  clientIpCount,
   getOrCreateRoom,
   canJoinRoom,
   joinRoom,
   leaveRoom,
 } = require("./room-manager");
-const { globalLimiter, ipLimiter } = require("./rate-limiter");
 
-const MAX_MESSAGE_SIZE = 1024; // Maximum message size in bytes
+// --- Rate limiting for image uploads ---
+// (Global and per-IP limits)
+const { globalLimiter, ipLimiter } = require("./rate-limiter");
 
 const app = express();
 
@@ -125,6 +113,20 @@ wss.on("connection", (ws, req) => {
       }
       // Handle image protocol
       if (parsed.type === "imageUploadStart") {
+        // Rate limiting for image uploads
+        try {
+          await globalLimiter.consume("global");
+          await ipLimiter.consume(clientIp);
+        } catch (rateErr) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Upload rate limit exceeded. Please try again later.",
+            })
+          );
+          return;
+        }
         // Initialize upload state
         ws.imageUploadState = {
           filename: parsed.filename,
@@ -242,8 +244,8 @@ wss.on("connection", (ws, req) => {
       }
     });
     if (roomIsEmpty) {
-      console.log(`Room ${roomId} is empty, cleaning up.`);
-      cleanupRoomImages(roomId);
+      console.log(`Room ${roomId} is empty.`);
+      // cleanupRoomImages(roomId); // Removed as requested
     }
   });
 

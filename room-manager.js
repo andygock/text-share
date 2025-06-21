@@ -1,8 +1,6 @@
-const { v4: uuidv4 } = require("uuid");
-
-const MAX_ROOMS = 100;
-const MAX_CLIENTS_PER_ROOM = 10;
-const MAX_CLIENTS = 100;
+const MAX_ROOMS = 20;
+const MAX_CLIENTS_PER_ROOM = 5;
+const MAX_CLIENTS = 20;
 const MAX_CLIENTS_PER_IP = 5;
 
 const rooms = new Map();
