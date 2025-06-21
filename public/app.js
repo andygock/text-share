@@ -1,220 +1,237 @@
-// public/app.js
-// Main client logic for Real-time Text & Image Share
-// (migrated from index.ejs)
+// app.js
+// Real-time Text & Image Share client
+// Implements the Images Transfer Protocol (see Images-Transfer-Protocol.md)
 
-(function () {
-  // --- QR code and barcode generation ---
-  function generateTextAreaBarcodes() {
-    const lines = sharedTextarea.value.split("\n");
-    const barcodesDiv = document.querySelector(".barcodes");
-    barcodesDiv.innerHTML = "";
-    lines.forEach((line) => {
-      const trimmedLine = line.trim();
-      if (trimmedLine) {
-        const barcodeDiv = document.createElement("div");
-        barcodeDiv.className = "barcode-item";
-        barcodesDiv.appendChild(barcodeDiv);
-        new QRCode(barcodeDiv, {
-          text: trimmedLine,
-          width: 128,
-          height: 128,
-          colorDark: "#000",
-          colorLight: "#fff",
-          correctLevel: QRCode.CorrectLevel.H,
-        });
-        const textDiv = document.createElement("div");
-        textDiv.className = "barcode-text";
-        textDiv.textContent = trimmedLine;
-        barcodeDiv.appendChild(textDiv);
-      }
-    });
-  }
+// --- DOM Elements ---
+const sharedTextarea = document.getElementById("sharedText");
+const qrcodeDiv = document.getElementById("qrcode");
+const userCountSpan = document.getElementById("userCount");
+const userCountStickyNum = document.getElementById("userCountStickyNum");
+const userListUl = document.getElementById("userList");
+const barcodesDiv = document.querySelector(".barcodes");
+const generateBarcodesButton = document.getElementById("generate-barcodes");
+const closeBarcodesButton = document.getElementById("close-barcodes");
+const imageInput = document.getElementById("imageInput");
+const selectImageBtn = document.getElementById("selectImageBtn");
+const dropArea = document.getElementById("dropArea");
+const sharedImages = document.getElementById("sharedImages");
 
-  // --- DOM references ---
-  const barcodesDiv = document.querySelector(".barcodes");
-  const generateBarcodesButton = document.getElementById("generate-barcodes");
-  const closeBarcodesButton = document.getElementById("close-barcodes");
-  const sharedTextarea = document.getElementById("sharedText");
-  const qrcodeDiv = document.getElementById("qrcode");
-  const userCountSpan = document.getElementById("userCount");
-  const userCountStickyNum = document.getElementById("userCountStickyNum");
-  const userListUl = document.getElementById("userList");
-  const imageInput = document.getElementById("imageInput");
-  const selectImageBtn = document.getElementById("selectImageBtn");
-  const dropArea = document.getElementById("dropArea");
-  const sharedImages = document.getElementById("sharedImages");
-  let uploadStatus = document.getElementById("uploadStatus");
-  if (!uploadStatus) {
-    uploadStatus = document.createElement("div");
-    uploadStatus.id = "uploadStatus";
-    uploadStatus.style.display = "none";
-    uploadStatus.style.margin = "0.5rem 0";
-    uploadStatus.style.textAlign = "center";
-    document
-      .getElementById("image-share")
-      .insertBefore(uploadStatus, sharedImages);
-  }
-  let uploadProgressBar = document.getElementById("uploadProgressBar");
-  if (!uploadProgressBar) {
-    uploadProgressBar = document.createElement("progress");
-    uploadProgressBar.id = "uploadProgressBar";
-    uploadProgressBar.max = 100;
-    uploadProgressBar.value = 0;
-    uploadProgressBar.style.display = "none";
-    uploadProgressBar.style.width = "60%";
-    uploadStatus.appendChild(uploadProgressBar);
-  }
+let uploadStatus = document.getElementById("uploadStatus");
+if (!uploadStatus) {
+  uploadStatus = document.createElement("div");
+  uploadStatus.id = "uploadStatus";
+  uploadStatus.style.display = "none";
+  uploadStatus.style.margin = "0.5rem 0";
+  uploadStatus.style.textAlign = "center";
+  document
+    .getElementById("image-share")
+    .insertBefore(uploadStatus, sharedImages);
+}
 
-  // --- Room and WebSocket setup ---
-  const roomId = window.ROOM_ID;
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const websocket = new WebSocket(
-    `${protocol}://${window.location.host}/${roomId}`
+let uploadProgressBar = document.getElementById("uploadProgressBar");
+if (!uploadProgressBar) {
+  uploadProgressBar = document.createElement("progress");
+  uploadProgressBar.id = "uploadProgressBar";
+  uploadProgressBar.max = 100;
+  uploadProgressBar.value = 0;
+  uploadProgressBar.style.display = "none";
+  uploadProgressBar.style.width = "60%";
+  uploadStatus.appendChild(uploadProgressBar);
+}
+
+// --- Room and WebSocket Setup ---
+const roomId = window.ROOM_ID;
+const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+const websocket = new WebSocket(
+  `${protocol}://${window.location.host}/${roomId}`
+);
+
+// --- QR Code for Room URL ---
+const currentUrl = window.location.href;
+new QRCode(qrcodeDiv, {
+  text: currentUrl,
+  width: 128,
+  height: 128,
+  colorDark: "#000",
+  colorLight: "#fff",
+  correctLevel: QRCode.CorrectLevel.H,
+});
+
+// --- Text Sync & Barcode ---
+let inputHash = "";
+function crc32(str) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < str.length; i++) {
+    crc ^= str.charCodeAt(i);
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function updateHash(str) {
+  inputHash = crc32(str);
+}
+
+function generateTextAreaBarcodes() {
+  const lines = sharedTextarea.value.split("\n");
+  barcodesDiv.innerHTML = "";
+  lines.forEach((line) => {
+    const trimmedLine = line.trim();
+    if (trimmedLine) {
+      const barcodeDiv = document.createElement("div");
+      barcodeDiv.className = "barcode-item";
+      barcodesDiv.appendChild(barcodeDiv);
+      new QRCode(barcodeDiv, {
+        text: trimmedLine,
+        width: 128,
+        height: 128,
+        colorDark: "#000",
+        colorLight: "#fff",
+        correctLevel: QRCode.CorrectLevel.H,
+      });
+      const textDiv = document.createElement("div");
+      textDiv.className = "barcode-text";
+      textDiv.textContent = trimmedLine;
+      barcodeDiv.appendChild(textDiv);
+    }
+  });
+}
+
+generateBarcodesButton.addEventListener("click", () => {
+  generateTextAreaBarcodes();
+  generateBarcodesButton.dataset.hash = inputHash;
+  generateBarcodesButton.disabled = true;
+  closeBarcodesButton.style.display = "inline-block";
+  barcodesDiv.style.display = "block";
+});
+
+closeBarcodesButton.addEventListener("click", () => {
+  barcodesDiv.innerHTML = "";
+  barcodesDiv.style.display = "none";
+  closeBarcodesButton.style.display = "none";
+  generateBarcodesButton.disabled = false;
+});
+
+sharedTextarea.addEventListener("input", () => {
+  websocket.send(
+    JSON.stringify({ type: "textUpdate", text: sharedTextarea.value })
   );
+  updateHash(sharedTextarea.value);
+  generateBarcodesButton.disabled = false;
+});
 
-  // --- QR code for room URL ---
-  const currentUrl = window.location.href;
-  new QRCode(qrcodeDiv, {
-    text: currentUrl,
-    width: 128,
-    height: 128,
-    colorDark: "#000",
-    colorLight: "#fff",
-    correctLevel: QRCode.CorrectLevel.H,
-  });
+// --- User List & Upload Enable ---
+let userCount = 0;
 
-  // --- CRC32 hash for text sync ---
-  let inputHash = "";
-  function crc32(str) {
-    let crc = 0xffffffff;
-    for (let i = 0; i < str.length; i++) {
-      crc ^= str.charCodeAt(i);
-      for (let j = 0; j < 8; j++) {
-        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-      }
-    }
-    return (crc ^ 0xffffffff) >>> 0;
-  }
-  function updateHash(str) {
-    inputHash = crc32(str);
-  }
+function setImageUploadEnabled(enabled) {
+  imageInput.disabled = !enabled;
+  selectImageBtn.disabled = !enabled;
+  dropArea.style.pointerEvents = enabled ? "auto" : "none";
+  dropArea.style.opacity = enabled ? "1" : "0.5";
 
-  // --- Barcode controls ---
-  generateBarcodesButton.addEventListener("click", () => {
-    generateTextAreaBarcodes();
-    generateBarcodesButton.dataset.hash = inputHash;
-    generateBarcodesButton.disabled = true;
-    closeBarcodesButton.style.display = "inline-block";
-    barcodesDiv.style.display = "block";
-  });
-  closeBarcodesButton.addEventListener("click", () => {
-    barcodesDiv.innerHTML = "";
-    barcodesDiv.style.display = "none";
-    closeBarcodesButton.style.display = "none";
-    generateBarcodesButton.disabled = false;
-  });
-
-  // --- Text sync ---
-  sharedTextarea.addEventListener("input", () => {
-    websocket.send(sharedTextarea.value);
-    updateHash(sharedTextarea.value);
-    generateBarcodesButton.disabled = false;
-  });
-
-  // --- User list and count ---
-  let userCount = 0;
-  function setImageUploadEnabled(enabled) {
-    imageInput.disabled = !enabled;
-    selectImageBtn.disabled = !enabled;
-    dropArea.style.pointerEvents = enabled ? "auto" : "none";
-    dropArea.style.opacity = enabled ? "1" : "0.5";
-    const infoMsgId = "image-upload-info-msg";
-    let infoMsg = document.getElementById(infoMsgId);
-    if (!enabled) {
-      dropArea.title =
-        "You must have at least 2 users in the room to upload images.";
-      selectImageBtn.title =
-        "You must have at least 2 users in the room to upload images.";
-      if (!infoMsg) {
-        infoMsg = document.createElement("div");
-        infoMsg.id = infoMsgId;
-        infoMsg.style.color = "#a94442";
-        infoMsg.style.fontSize = "0.95rem";
-        infoMsg.style.margin = "0.5rem 0 0.5rem 0";
-        infoMsg.style.textAlign = "center";
-        infoMsg.textContent =
-          "You cannot upload images because there is no one else connected to this room.";
-        document
-          .getElementById("image-share")
-          .insertBefore(infoMsg, sharedImages);
-      } else {
-        infoMsg.style.display = "block";
-      }
+  const infoMsgId = "image-upload-info-msg";
+  let infoMsg = document.getElementById(infoMsgId);
+  if (!enabled) {
+    dropArea.title =
+      "You must have at least 2 users in the room to upload images.";
+    selectImageBtn.title =
+      "You must have at least 2 users in the room to upload images.";
+    if (!infoMsg) {
+      infoMsg = document.createElement("div");
+      infoMsg.id = infoMsgId;
+      infoMsg.style.color = "#a94442";
+      infoMsg.style.fontSize = "0.95rem";
+      infoMsg.style.margin = "0.5rem 0 0.5rem 0";
+      infoMsg.style.textAlign = "center";
+      infoMsg.textContent =
+        "You cannot upload images because there is no one else connected to this room.";
+      document
+        .getElementById("image-share")
+        .insertBefore(infoMsg, sharedImages);
     } else {
-      dropArea.title = "";
-      selectImageBtn.title = "Select Image";
-      if (infoMsg) infoMsg.style.display = "none";
+      infoMsg.style.display = "block";
     }
+  } else {
+    dropArea.title = "";
+    selectImageBtn.title = "Select Image";
+    if (infoMsg) infoMsg.style.display = "none";
   }
-  function updateUserList(users) {
-    userListUl.innerHTML = "";
-    users.forEach((ip) => addUserToList(ip));
-    userCountSpan.textContent = users.length;
-    userCountStickyNum.textContent = users.length;
-    userCount = users.length;
-    setImageUploadEnabled(userCount > 1);
+}
+
+function updateUserList(users) {
+  userListUl.innerHTML = "";
+  users.forEach((ip) => addUserToList(ip));
+  userCountSpan.textContent = users.length;
+  userCountStickyNum.textContent = users.length;
+  userCount = users.length;
+  setImageUploadEnabled(userCount > 1);
+}
+
+function addUser(ip) {
+  addUserToList(ip);
+  userCount = parseInt(userCountSpan.textContent) + 1;
+  userCountSpan.textContent = userCount;
+  userCountStickyNum.textContent = userCount;
+  setImageUploadEnabled(userCount > 1);
+}
+
+function removeUser(ip) {
+  removeUserFromList(ip);
+  userCount = parseInt(userCountSpan.textContent) - 1;
+  userCountSpan.textContent = userCount;
+  userCountStickyNum.textContent = userCount;
+  setImageUploadEnabled(userCount > 1);
+}
+
+function addUserToList(ip) {
+  const li = document.createElement("li");
+  li.textContent = ip;
+  li.dataset.ip = ip;
+  userListUl.appendChild(li);
+}
+
+function removeUserFromList(ip) {
+  const userLi = userListUl.querySelector(`li[data-ip="${ip}"]`);
+  if (userLi) {
+    userListUl.removeChild(userLi);
   }
-  function addUser(ip) {
-    addUserToList(ip);
-    userCount = parseInt(userCountSpan.textContent) + 1;
-    userCountSpan.textContent = userCount;
-    userCountStickyNum.textContent = userCount;
-    setImageUploadEnabled(userCount > 1);
-  }
-  function removeUser(ip) {
-    removeUserFromList(ip);
-    userCount = parseInt(userCountSpan.textContent) - 1;
-    userCountSpan.textContent = userCount;
-    userCountStickyNum.textContent = userCount;
-    setImageUploadEnabled(userCount > 1);
-  }
-  function addUserToList(ip) {
-    const li = document.createElement("li");
-    li.textContent = ip;
-    li.dataset.ip = ip;
-    userListUl.appendChild(li);
-  }
-  function removeUserFromList(ip) {
-    const userLi = userListUl.querySelector(`li[data-ip="${ip}"]`);
-    if (userLi) {
-      userListUl.removeChild(userLi);
-    }
+}
+
+// --- Images Transfer Protocol (see Images-Transfer-Protocol.md) ---
+// Handles: imageUploadStart, imageUploadChunk, imageUploadProgress, imageUploadComplete, imageUploadError
+let incomingImage = null;
+let incomingChunks = [];
+let incomingTotalChunks = 0;
+let incomingFilename = "";
+let incomingMimeType = "";
+
+websocket.onmessage = (event) => {
+  let message;
+  try {
+    message = JSON.parse(event.data);
+  } catch {
+    return;
   }
 
-  // --- WebSocket message handling ---
-  let incomingImage = null;
-  let incomingChunks = [];
-  let incomingTotalChunks = 0;
-  let incomingFilename = "";
-  let incomingMimeType = "";
-  websocket.onmessage = (event) => {
-    let message;
-    try {
-      message = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-    if (message.type === "textUpdate") {
+  switch (message.type) {
+    case "textUpdate":
       sharedTextarea.value = message.text;
       updateHash(message.text);
       generateBarcodesButton.disabled = false;
-    } else if (message.type === "userList") {
+      break;
+    case "userList":
       updateUserList(message.users);
-    } else if (message.type === "userConnected") {
+      break;
+    case "userConnected":
       addUser(message.ip);
-    } else if (message.type === "userDisconnected") {
+      break;
+    case "userDisconnected":
       removeUser(message.ip);
-    } else if (message.type === "imageUploadStart") {
+      break;
+    case "imageUploadStart":
+      // Protocol: Step 1 (see protocol doc)
       incomingImage = null;
       incomingChunks = [];
       incomingTotalChunks = 0;
@@ -222,15 +239,21 @@
       incomingMimeType = message.mimeType;
       uploadStatus.style.display = "block";
       uploadStatus.textContent = `Receiving image: ${incomingFilename}`;
-    } else if (message.type === "imageUploadChunk") {
+      break;
+    case "imageUploadChunk":
+      // Protocol: Step 2/4 (see protocol doc)
       if (message.filename !== incomingFilename) return;
       incomingChunks[message.chunkIndex] = message.data;
       incomingTotalChunks = message.totalChunks;
-    } else if (message.type === "imageUploadProgress") {
+      break;
+    case "imageUploadProgress":
+      // Protocol: Step 5 (see protocol doc)
       if (message.filename === incomingFilename) {
         uploadStatus.textContent = `Receiving... ${message.progress}%`;
       }
-    } else if (message.type === "imageUploadComplete") {
+      break;
+    case "imageUploadComplete":
+      // Protocol: Step 6 (see protocol doc)
       if (message.filename !== incomingFilename) return;
       const base64 = message.data;
       const img = document.createElement("img");
@@ -257,84 +280,96 @@
       incomingTotalChunks = 0;
       incomingFilename = "";
       incomingMimeType = "";
-    } else if (message.type === "imageUploadError") {
+      break;
+    case "imageUploadError":
+      // Protocol: Step 7 (see protocol doc)
       uploadStatus.textContent = `Error: ${message.error}`;
       setTimeout(() => (uploadStatus.style.display = "none"), 3000);
-    }
-  };
-
-  // --- Image upload logic ---
-  function splitBase64IntoChunks(base64, chunkSize) {
-    const chunks = [];
-    for (let i = 0; i < base64.length; i += chunkSize) {
-      chunks.push(base64.slice(i, i + chunkSize));
-    }
-    return chunks;
+      break;
   }
-  async function uploadImage(file) {
-    uploadStatus.style.display = "block";
-    uploadStatus.textContent = "Processing image...";
-    const arrayBuffer = await file.arrayBuffer();
+};
+
+// --- Image Upload (Protocol Steps 1-2) ---
+function splitBase64IntoChunks(base64, chunkSize) {
+  const chunks = [];
+  for (let i = 0; i < base64.length; i += chunkSize) {
+    chunks.push(base64.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+async function uploadImage(file) {
+  uploadStatus.style.display = "block";
+  uploadStatus.textContent = "Processing image...";
+  const arrayBuffer = await file.arrayBuffer();
+  websocket.send(
+    JSON.stringify({
+      type: "imageUploadStart",
+      filename: file.name,
+      mimeType: file.type,
+      size: file.size,
+    })
+  );
+  const base64 = btoa(
+    new Uint8Array(arrayBuffer).reduce(
+      (data, byte) => data + String.fromCharCode(byte),
+      ""
+    )
+  );
+  const chunkSize = 32 * 1024;
+  const chunks = splitBase64IntoChunks(base64, chunkSize);
+  for (let i = 0; i < chunks.length; i++) {
     websocket.send(
       JSON.stringify({
-        type: "imageUploadStart",
+        type: "imageUploadChunk",
         filename: file.name,
-        mimeType: file.type,
-        size: file.size,
+        chunkIndex: i,
+        totalChunks: chunks.length,
+        data: chunks[i],
       })
     );
-    const base64 = btoa(
-      new Uint8Array(arrayBuffer).reduce(
-        (data, byte) => data + String.fromCharCode(byte),
-        ""
-      )
-    );
-    const chunkSize = 32 * 1024;
-    const chunks = splitBase64IntoChunks(base64, chunkSize);
-    for (let i = 0; i < chunks.length; i++) {
-      websocket.send(
-        JSON.stringify({
-          type: "imageUploadChunk",
-          filename: file.name,
-          chunkIndex: i,
-          totalChunks: chunks.length,
-          data: chunks[i],
-        })
-      );
-      const percent = Math.round(((i + 1) / chunks.length) * 100);
-      uploadStatus.textContent = `Uploading... ${percent}%`;
-      await new Promise((r) => setTimeout(r, 10));
-    }
+    const percent = Math.round(((i + 1) / chunks.length) * 100);
+    uploadStatus.textContent = `Uploading... ${percent}%`;
+    await new Promise((r) => setTimeout(r, 10));
   }
-  selectImageBtn.addEventListener("click", () => imageInput.click());
-  imageInput.addEventListener("change", (e) => {
-    if (e.target.files && e.target.files[0]) {
-      uploadImage(e.target.files[0]);
-    }
-  });
-  dropArea.addEventListener("drop", (e) => {
-    e.preventDefault();
-    dropArea.classList.remove("dragover");
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      uploadImage(e.dataTransfer.files[0]);
-    }
-  });
-  dropArea.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    dropArea.classList.add("dragover");
-  });
-  dropArea.addEventListener("dragleave", () =>
-    dropArea.classList.remove("dragover")
-  );
+}
+selectImageBtn.addEventListener("click", () => imageInput.click());
 
-  websocket.onopen = () => {
-    // console.log("WebSocket connection opened");
-  };
-  websocket.onclose = () => {
-    // console.log("WebSocket connection closed");
-  };
-  websocket.onerror = (error) => {
-    console.error("WebSocket error:", error);
-  };
-  setImageUploadEnabled(false);
-})();
+imageInput.addEventListener("change", (e) => {
+  if (e.target.files && e.target.files[0]) {
+    uploadImage(e.target.files[0]);
+  }
+});
+
+dropArea.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dropArea.classList.remove("dragover");
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    uploadImage(e.dataTransfer.files[0]);
+  }
+});
+
+dropArea.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  dropArea.classList.add("dragover");
+});
+
+dropArea.addEventListener("dragleave", () =>
+  dropArea.classList.remove("dragover")
+);
+
+// --- WebSocket Connection Events ---
+websocket.onopen = () => {
+  console.log("WebSocket connection opened");
+};
+
+websocket.onclose = () => {
+  console.log("WebSocket connection closed");
+};
+
+websocket.onerror = (error) => {
+  console.error("WebSocket error:", error);
+};
+
+// --- Initial State ---
+setImageUploadEnabled(false);

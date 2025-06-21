@@ -101,11 +101,16 @@ wss.on("connection", (ws, req) => {
       try {
         parsed = JSON.parse(message);
       } catch {
-        // Fallback: treat as text update
+        // Ignore non-JSON messages
+        return;
+      }
+      // Handle protocol messages
+      if (parsed.type === "textUpdate") {
+        // Broadcast to all other clients
         roomClients.forEach((client) => {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
             client.send(
-              JSON.stringify({ type: "textUpdate", text: message.toString() })
+              JSON.stringify({ type: "textUpdate", text: parsed.text })
             );
           }
         });
@@ -227,7 +232,6 @@ wss.on("connection", (ws, req) => {
       }
       return;
     }
-    // ...existing code for binary (not used)...
   });
 
   ws.on("close", () => {
