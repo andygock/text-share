@@ -19,6 +19,7 @@ const sharedImages = document.getElementById("sharedImages");
 const uploadStatus = document.getElementById("uploadStatus");
 const uploadError = document.getElementById("uploadError");
 const uploadProgressBar = document.getElementById("uploadProgressBar");
+const generalError = document.getElementById("generalError");
 
 // --- Room and WebSocket Setup ---
 const roomId = window.ROOM_ID;
@@ -378,6 +379,23 @@ function setUploadError({ text = "", show = false, timeout = 2000 } = {}) {
   }
 }
 
+function setGeneralError({ text = "", show = false, timeout = 3000 } = {}) {
+  generalError.textContent = text;
+  generalError.style.display = show && text ? "block" : "none";
+
+  // If timeout is false, do not auto-hide the message; it will stay until this function is called again
+  if (timeout === false) {
+    return;
+  }
+
+  if (show && text && timeout > 0) {
+    setTimeout(() => {
+      generalError.style.display = "none";
+      generalError.textContent = "";
+    }, timeout);
+  }
+}
+
 // Remove error styling from uploadStatus if present
 function clearUploadStatusStyles() {
   uploadStatus.style.background = "";
@@ -435,6 +453,17 @@ websocket.onclose = () => {
 
 websocket.onerror = (error) => {
   console.error("WebSocket error:", error);
+  userListUl.innerHTML = "";
+  userCount = 0;
+  userCountSpan.textContent = "0";
+  userCountStickyNum.textContent = "0";
+  setImageUploadEnabled(false);
+  setUploadStatus({ text: "", show: false });
+  setGeneralError({
+    text: "Connection error. Please refresh the page.",
+    show: true,
+    timeout: false,
+  });
 };
 
 // --- Initial State ---

@@ -37,8 +37,10 @@ body {
   max-width: 50rem;
 }
 
-h1 {
-  margin-bottom: 1.5rem;
+h1,
+h2 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
   color: #555;
 }
 
@@ -242,6 +244,18 @@ textarea {
   color: var(--danger-text);
   border: 1px solid var(--danger-text);
   font-weight: bold;
+}
+
+.general-error {
+  display: none;
+  margin: 0.5rem 0;
+  text-align: center;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeeba;
+  border-radius: var(--border-radius);
+  font-weight: bold;
+  padding: 0.5rem 1rem;
 }
 
 .upload-progress-bar {
