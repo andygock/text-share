@@ -149,6 +149,12 @@ function updateUserList(users) {
   userCountStickyNum.textContent = users.length;
   userCount = users.length;
   setImageUploadEnabled(userCount > 1);
+  const userCountSticky = document.getElementById("userCountSticky");
+  if (userCount >= 2) {
+    userCountSticky.classList.add("active");
+  } else {
+    userCountSticky.classList.remove("active");
+  }
 }
 
 function addUser(ip) {
@@ -157,6 +163,12 @@ function addUser(ip) {
   userCountSpan.textContent = userCount;
   userCountStickyNum.textContent = userCount;
   setImageUploadEnabled(userCount > 1);
+  const userCountSticky = document.getElementById("userCountSticky");
+  if (userCount >= 2) {
+    userCountSticky.classList.add("active");
+  } else {
+    userCountSticky.classList.remove("active");
+  }
 }
 
 function removeUser(ip) {
@@ -165,6 +177,12 @@ function removeUser(ip) {
   userCountSpan.textContent = userCount;
   userCountStickyNum.textContent = userCount;
   setImageUploadEnabled(userCount > 1);
+  const userCountSticky = document.getElementById("userCountSticky");
+  if (userCount >= 2) {
+    userCountSticky.classList.add("active");
+  } else {
+    userCountSticky.classList.remove("active");
+  }
 }
 
 function addUserToList(ip) {

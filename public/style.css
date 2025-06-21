@@ -231,6 +231,11 @@ textarea {
   user-select: none;
 }
 
+#userCountSticky.active {
+  background: #00ff5a !important;
+  color: #222;
+}
+
 .upload-status {
   display: none;
   margin: 0.5rem 0;
