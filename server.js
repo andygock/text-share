@@ -13,9 +13,13 @@ const {
   leaveRoom,
 } = require("./room-manager");
 
-// --- Rate limiting for image uploads ---
-// (Global and per-IP limits)
-const { globalLimiter, ipLimiter } = require("./rate-limiter");
+// --- Rate limiting for image uploads and text input ---
+const {
+  globalUploadLimiter,
+  ipUploadLimiter,
+  globalTextLimiter,
+  ipTextLimiter,
+} = require("./rate-limiter");
 
 const app = express();
 
@@ -91,6 +95,19 @@ wss.on("connection", (ws, req) => {
       }
       // Handle protocol messages
       if (parsed.type === "textUpdate") {
+        // --- Rate limiting for text updates ---
+        try {
+          await globalTextLimiter.consume("global");
+          await ipTextLimiter.consume(clientIp);
+        } catch (rateErr) {
+          ws.send(
+            JSON.stringify({
+              type: "textUpdateError",
+              error: "Text update rate limit exceeded. Please try again later.",
+            })
+          );
+          return;
+        }
         // Broadcast to all other clients
         roomClients.forEach((client) => {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
@@ -105,8 +122,8 @@ wss.on("connection", (ws, req) => {
       if (parsed.type === "imageUploadStart") {
         // Rate limiting for image uploads
         try {
-          await globalLimiter.consume("global");
-          await ipLimiter.consume(clientIp);
+          await globalUploadLimiter.consume("global");
+          await ipUploadLimiter.consume(clientIp);
         } catch (rateErr) {
           ws.send(
             JSON.stringify({

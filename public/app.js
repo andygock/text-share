@@ -275,9 +275,17 @@ websocket.onmessage = (event) => {
       break;
     case "imageUploadError":
       // Protocol: Step 7 (see protocol doc)
-      console.log("Image upload error:", message.error);
+      // console.log("Image upload error:", message.error);
       setUploadError({
         text: `Error uploading image: ${message.error}`,
+        show: true,
+      });
+      break;
+    case "textUpdateError":
+      // we should really make a separate div for text update errors, instead of reusing uploadError
+      // we'll just leave it for now though
+      setUploadError({
+        text: message.error || "Text update rate limit exceeded.",
         show: true,
       });
       break;
