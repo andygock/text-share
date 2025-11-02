@@ -125,6 +125,13 @@ function updateH1UserCount(count) {
     const usersText =
       count === 1 ? "1 user connected" : `${count} users connected`;
     el.textContent = `(${usersText})`;
+
+    // if more than 1 user, add class "green" for green text
+    if (count > 1) {
+      el.classList.add("green");
+    } else {
+      el.classList.remove("green");
+    }
   } catch (e) {
     // ignore
   }
