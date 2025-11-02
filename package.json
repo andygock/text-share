@@ -9,11 +9,9 @@
     "uuid": "^11.1.0",
     "ws": "^8.18.1"
   },
-  "devDependencies": {
-    "nodemon": "^3.1.9"
-  },
+  "devDependencies": {},
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "node --watch --watch-preserve-output ./server.js"
   }
 }
