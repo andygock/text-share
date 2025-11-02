@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Join with PIN - Real-time Text & Image Share</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div id="join-page" class="container">
+      <h1>Join with PIN</h1>
+      <p>
+        Enter the 6-digit PIN given to you by the person sharing their room.
+      </p>
+      <form id="joinForm">
+        <input
+          id="pinInput"
+          name="pin"
+          placeholder="123456"
+          maxlength="6"
+          autocomplete="off"
+          autofocus
+        />
+        <button id="requestJoinBtn">Request Join</button>
+      </form>
+      <div id="joinStatus"></div>
+      <p class="create-link">
+        Or you can <a href="/">create your own new room</a>.
+      </p>
+    </div>
+    <script>
+      const form = document.getElementById("joinForm");
+      const pinInput = document.getElementById("pinInput");
+      const statusDiv = document.getElementById("joinStatus");
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const pin = (pinInput.value || "").trim();
+        if (!/^[0-9]{6}$/.test(pin)) {
+          statusDiv.textContent = "Please enter a 6-digit numeric PIN.";
+          return;
+        }
+        statusDiv.textContent = "Requesting... waiting for owner to accept";
+        try {
+          const resp = await fetch("/request-join", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pin }),
+          });
+          const body = await resp.json();
+          if (!body.ok) {
+            statusDiv.textContent = body.error || "Failed to request join";
+            return;
+          }
+          // success — owner accepted; redirect to room
+          statusDiv.textContent = "Accepted — joining...";
+          window.location.href = body.roomUrl;
+        } catch (err) {
+          statusDiv.textContent = "Network error while requesting join.";
+        }
+      });
+    </script>
+  </body>
+</html>

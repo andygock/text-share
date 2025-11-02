@@ -78,6 +78,7 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
     - **Scan the QR code:** Use a QR code scanner app on your mobile device to scan the QR code displayed on the page. This will open the same URL in your mobile browser.
     - **Manually type or copy the URL:**  Share the full URL (e.g., `http://localhost:3000/[uuid]`) with anyone you want to share text or images with.
+    - Alternatively, you can use the "Share with PIN" feature described further below.
 
 4. **Start sharing:**
 
@@ -91,6 +92,20 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 6. **To end sharing:**
 
     Simply close the browser tab or window on all devices. Once all users disconnect, the room is automatically cleared on the server and all images are deleted.
+
+### Join by PIN
+
+If scanning a QR code or copying the full URL is not practical, you can use a 6-digit PIN to invite someone into your room. This is shown as a sub-option of "Share the URL":
+
+- Click "Share with PIN" in the room UI. A temporary 6-digit code will be generated and shown on your screen (expires shortly).
+- Read or type the 6-digit PIN to the other person. They should open the site and choose "Join with PIN" (or visit `/join`) and enter the code.
+- The room owner will receive a join request and must Accept the request. Once accepted, the requester is redirected into the room.
+
+Security notes
+
+- The PIN is short (6 digits) by design for convenience; it is tied to a server-side ephemeral invite and expires quickly (default: 2 minutes).
+- The owner must explicitly Accept the join request; repeated wrong attempts are limited and temporarily blocked.
+- All communication uses the existing WebSocket channel and TLS/WSS when deployed over HTTPS.
 
 ---
 

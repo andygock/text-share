@@ -25,6 +25,83 @@ const app = express();
 
 app.set("view engine", "ejs");
 app.use(express.static("public")); // Serve static files from 'public' directory
+app.use(express.json());
+
+const crypto = require("crypto");
+const { globalJoinLimiter, ipJoinLimiter } = require("./rate-limiter");
+
+// In-memory invite / request stores
+const sockets = new Map(); // socketId -> ws
+const pendingInvites = new Map(); // token -> invite
+const pinToToken = new Map(); // pin -> token
+const pendingRequests = new Map(); // requestId -> { res, timeout }
+
+// Configurable invite settings
+const INVITE_TTL_MS = parseInt(process.env.INVITE_TTL_MS, 10) || 30000; // 30s
+const INVITE_MAX_ATTEMPTS = parseInt(process.env.INVITE_MAX_ATTEMPTS, 10) || 5;
+
+function generateUnique6DigitPin() {
+  // Try a few times to avoid collision with active pins
+  for (let i = 0; i < 10; i++) {
+    const pin = Math.floor(Math.random() * 1000000)
+      .toString()
+      .padStart(6, "0");
+    if (!pinToToken.has(pin)) return pin;
+  }
+  // Fallback: brute force until unique
+  let pin;
+  do {
+    pin = Math.floor(Math.random() * 1000000)
+      .toString()
+      .padStart(6, "0");
+  } while (pinToToken.has(pin));
+  return pin;
+}
+
+function expireInvite(token) {
+  // centralized deletion to ensure timeouts and pending requests are cleaned up
+  deleteInvite(token, "expired");
+}
+
+function deleteInvite(token, reason = "removed") {
+  const invite = pendingInvites.get(token);
+  if (!invite) return;
+  // clear scheduled expiry if present
+  if (invite.timeoutId) {
+    try {
+      clearTimeout(invite.timeoutId);
+    } catch (e) {}
+  }
+  pendingInvites.delete(token);
+  pinToToken.delete(invite.pin);
+  // notify owner if connected
+  const ownerWs = sockets.get(invite.ownerSocketId);
+  if (ownerWs && ownerWs.readyState === WebSocket.OPEN) {
+    try {
+      ownerWs.send(
+        JSON.stringify({ type: "inviteRemoved", pin: invite.pin, reason })
+      );
+    } catch (e) {}
+  }
+  // fail any pending requests for this invite
+  for (const [requestId, pending] of pendingRequests.entries()) {
+    if (pending.inviteToken === token) {
+      try {
+        pending.res.json({ ok: false, error: `Invite ${reason}` });
+      } catch (e) {}
+      clearTimeout(pending.timeout);
+      pendingRequests.delete(requestId);
+    }
+  }
+}
+
+// Periodically cleanup expired invites
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, invite] of pendingInvites.entries()) {
+    if (invite.expiresAt <= now) expireInvite(token);
+  }
+}, 30 * 1000);
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -36,6 +113,10 @@ const MAX_IMAGE_UPLOAD_SIZE =
 app.get("/", (req, res) => {
   const uuid = uuidv4();
   res.redirect(`/${uuid}`);
+});
+
+app.get("/join", (req, res) => {
+  res.render("join");
 });
 
 app.get("/:roomId", (req, res) => {
@@ -51,7 +132,85 @@ app.get("/:roomId", (req, res) => {
   res.render("index", { roomId, maxImageUploadSize: MAX_IMAGE_UPLOAD_SIZE });
 });
 
+// Endpoint used by a recipient to request joining a room using a short PIN
+app.post("/request-join", async (req, res) => {
+  const clientIp =
+    req.headers["x-forwarded-for"]?.split(",").shift() ||
+    req.socket.remoteAddress ||
+    "127.0.0.1";
+
+  // rate limit join requests
+  try {
+    await globalJoinLimiter.consume("global");
+    await ipJoinLimiter.consume(clientIp);
+  } catch (rlErr) {
+    return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
+  }
+
+  const { pin } = req.body || {};
+  if (!pin || typeof pin !== "string") {
+    return res.status(400).json({ ok: false, error: "Missing pin" });
+  }
+  // Find invite by pin
+  const token = pinToToken.get(pin);
+  if (!token)
+    return res.status(404).json({ ok: false, error: "No active invite" });
+  const invite = pendingInvites.get(token);
+  if (!invite || invite.expiresAt <= Date.now() || invite.used) {
+    pinToToken.delete(pin);
+    pendingInvites.delete(token);
+    return res.status(404).json({ ok: false, error: "No active invite" });
+  }
+  // attempt counting
+  if (invite.attempts >= invite.maxAttempts) {
+    return res
+      .status(429)
+      .json({ ok: false, error: "Too many attempts for this code" });
+  }
+  invite.attempts++;
+
+  // Ensure owner is connected
+  const ownerWs = sockets.get(invite.ownerSocketId);
+  if (!ownerWs || ownerWs.readyState !== WebSocket.OPEN) {
+    return res
+      .status(410)
+      .json({ ok: false, error: "Invite owner not available" });
+  }
+
+  // Create a pending request and notify owner; keep the response open until owner accepts/denies or timeout
+  const requestId = uuidv4();
+  const timeout = setTimeout(() => {
+    const pending = pendingRequests.get(requestId);
+    if (!pending) return;
+    try {
+      pending.res.json({ ok: false, error: "Timed out waiting for owner" });
+    } catch (e) {}
+    pendingRequests.delete(requestId);
+  }, Math.min(invite.expiresAt - Date.now(), 120000));
+
+  pendingRequests.set(requestId, { res, timeout, inviteToken: token });
+  // Notify owner of the join request
+  try {
+    ownerWs.send(
+      JSON.stringify({
+        type: "joinRequest",
+        requestId,
+        requesterIP: clientIp,
+        ua: req.headers["user-agent"] || "",
+      })
+    );
+  } catch (err) {
+    clearTimeout(timeout);
+    pendingRequests.delete(requestId);
+    return res.status(500).json({ ok: false, error: "Failed to notify owner" });
+  }
+  // do not end response here - it will be fulfilled when owner calls respondInvite via WS
+});
+
 wss.on("connection", (ws, req) => {
+  // assign an id for this socket so it can be referenced from invite flows
+  ws.id = uuidv4();
+  sockets.set(ws.id, ws);
   const roomId = req.url.substring(1); // URL after / is the roomId
   const clientIp =
     req.headers["x-forwarded-for"]?.split(",").shift() ||
@@ -82,6 +241,9 @@ wss.on("connection", (ws, req) => {
   });
 
   ws.ip = clientIp;
+
+  // WS-level invite messages
+  // Supported messages: generateInvite, respondInvite
 
   ws.on("message", async (message, isBinary) => {
     // Handle text messages as before
@@ -116,6 +278,113 @@ wss.on("connection", (ws, req) => {
             );
           }
         });
+        return;
+      }
+      // INVITE: owner wants to generate a short PIN for this room
+      if (parsed.type === "generateInvite") {
+        // Only allow if this ws is in a room (roomId) and is actually part of that room
+        // Create invite object
+        try {
+          const pin = generateUnique6DigitPin();
+          const token = crypto.randomBytes(16).toString("hex");
+          const invite = {
+            token,
+            roomId,
+            pin,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + INVITE_TTL_MS,
+            ownerSocketId: ws.id,
+            attempts: 0,
+            maxAttempts: INVITE_MAX_ATTEMPTS,
+            used: false,
+          };
+          // If this owner already has an active invite, remove it (only one invite per client)
+          for (const [
+            existingToken,
+            existingInvite,
+          ] of pendingInvites.entries()) {
+            if (existingInvite.ownerSocketId === ws.id) {
+              deleteInvite(existingToken, "replaced");
+            }
+          }
+
+          // store invite and schedule expiry (keep timeout id so we can clear on replace)
+          const timeoutId = setTimeout(
+            () => expireInvite(token),
+            INVITE_TTL_MS + 1000
+          );
+          invite.timeoutId = timeoutId;
+          pendingInvites.set(token, invite);
+          pinToToken.set(pin, token);
+          // Respond to owner with pin
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: "inviteGenerated",
+                pin: invite.pin,
+                expiresAt: invite.expiresAt,
+              })
+            );
+          }
+        } catch (err) {
+          console.error("Failed to generate invite", err);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: "inviteError",
+                error: "Failed to generate invite",
+              })
+            );
+          }
+        }
+        return;
+      }
+
+      // Owner responds to a pending join request
+      if (parsed.type === "respondInvite") {
+        const { requestId, accept } = parsed;
+        const pending = pendingRequests.get(requestId);
+        if (!pending) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: "respondInviteError",
+                error: "Unknown or expired request",
+              })
+            );
+          }
+          return;
+        }
+        const { inviteToken } = pending;
+        const invite = pendingInvites.get(inviteToken);
+        if (!invite) {
+          // invite expired
+          pending.res.json({ ok: false, error: "Invite expired" });
+          clearTimeout(pending.timeout);
+          pendingRequests.delete(requestId);
+          return;
+        }
+        // Only the owner can respond
+        if (invite.ownerSocketId !== ws.id) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: "respondInviteError",
+                error: "Not authorized",
+              })
+            );
+          }
+          return;
+        }
+        if (accept) {
+          invite.used = true;
+          // respond to pending HTTP request with room URL so the requester can redirect
+          pending.res.json({ ok: true, roomUrl: `/${invite.roomId}` });
+        } else {
+          pending.res.json({ ok: false, error: "Denied by owner" });
+        }
+        clearTimeout(pending.timeout);
+        pendingRequests.delete(requestId);
         return;
       }
       // Handle image protocol
@@ -262,6 +531,13 @@ wss.on("connection", (ws, req) => {
   });
 
   ws.on("close", () => {
+    sockets.delete(ws.id);
+    // Remove any invites owned by this socket and fail pending requests
+    for (const [token, invite] of pendingInvites.entries()) {
+      if (invite.ownerSocketId === ws.id) {
+        deleteInvite(token, "owner_disconnected");
+      }
+    }
     const roomIsEmpty = leaveRoom(roomId, ws, clientIp);
     console.log(`Client disconnected from room ${roomId} from IP: ${clientIp}`);
     console.log(

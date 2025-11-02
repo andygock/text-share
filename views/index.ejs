@@ -60,13 +60,21 @@
       <div id="top">
         <div id="top-left-controls">
           <div id="qrcode"></div>
+          <div id="pin-share">
+            <button class="button" id="generate-pin">Share with PIN</button>
+            <span id="pin-value" class="pin-value"></span>
+            <span id="pin-expires" class="pin-expires"></span>
+            <div id="incoming-requests"></div>
+          </div>
         </div>
         <div id="text-content">
-          <h1>
-            Real-time Text & Image Share
-            <button class="new-room">New Room</button>
-          </h1>
-
+          <div id="header">
+            <h1>Real-time Text & Image Share</h1>
+            <div>
+              <a href="/">New Room</a> or
+              <a href="/join">Join Room</a>
+            </div>
+          </div>
           <textarea
             id="sharedText"
             placeholder="Start typing to share..."
@@ -75,13 +83,7 @@
             <button class="button" id="generate-barcodes">
               Generate QRCodes for Text
             </button>
-            <button
-              id="close-barcodes"
-              title="Hide QR Codes"
-              style="display: none"
-            >
-              ✕
-            </button>
+            <button id="close-barcodes" title="Hide QR Codes">✕</button>
           </div>
         </div>
       </div>
@@ -96,7 +98,6 @@
             id="imageInput"
             name="image"
             accept="image/png,image/jpeg,image/webp"
-            style="display: none"
             multiple="{false}"
           />
           <div id="dropArea">

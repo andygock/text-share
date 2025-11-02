@@ -5,6 +5,13 @@
 // --- DOM Elements ---
 const sharedTextarea = document.getElementById("sharedText");
 const qrcodeDiv = document.getElementById("qrcode");
+const generatePinBtn = document.getElementById("generate-pin");
+const pinValueSpan = document.getElementById("pin-value");
+const pinExpiresSpan = document.getElementById("pin-expires");
+const incomingRequestsDiv = document.getElementById("incoming-requests");
+// Track the currently shown PIN and its expiry updater so we can clear when replaced
+let currentPin = null;
+let currentPinInterval = null;
 const userCountSpan = document.getElementById("userCount");
 const userCountStickyNum = document.getElementById("userCountStickyNum");
 const userListUl = document.getElementById("userList");
@@ -300,6 +307,108 @@ websocket.onmessage = (event) => {
         show: true,
       });
       break;
+    case "inviteGenerated":
+      // Clear any previous pin interval/display so we only show one active pin per client
+      if (currentPinInterval) {
+        clearInterval(currentPinInterval);
+        currentPinInterval = null;
+      }
+      currentPin = message.pin;
+      if (pinValueSpan) {
+        pinValueSpan.textContent = message.pin;
+      }
+      if (pinExpiresSpan) {
+        const msLeft = Math.max(0, message.expiresAt - Date.now());
+        let seconds = Math.floor(msLeft / 1000);
+        pinExpiresSpan.textContent = `Expires in ${seconds}s`;
+        // update countdown every second
+        currentPinInterval = setInterval(() => {
+          seconds -= 1;
+          if (seconds <= 0) {
+            pinExpiresSpan.textContent = "(expired)";
+            if (pinValueSpan && pinValueSpan.textContent === currentPin) {
+              pinValueSpan.textContent = "";
+            }
+            clearInterval(currentPinInterval);
+            currentPinInterval = null;
+            currentPin = null;
+            return;
+          }
+          pinExpiresSpan.textContent = `Expires in ${seconds}s`;
+        }, 1000);
+      }
+      break;
+    case "inviteExpired":
+      // Only clear if this maps to the currently displayed PIN
+      if (currentPin && message.pin === currentPin) {
+        if (pinValueSpan) pinValueSpan.textContent = "";
+        if (pinExpiresSpan) pinExpiresSpan.textContent = "(expired)";
+        if (currentPinInterval) {
+          clearInterval(currentPinInterval);
+          currentPinInterval = null;
+        }
+        currentPin = null;
+      }
+      break;
+    case "joinRequest":
+      // show incoming request in owner's UI
+      if (!incomingRequestsDiv) break;
+      const reqDiv = document.createElement("div");
+      reqDiv.className = "incoming-request-item";
+      reqDiv.dataset.requestId = message.requestId;
+      reqDiv.style.border = "1px solid #ddd";
+      reqDiv.style.padding = "0.4rem";
+      reqDiv.style.marginTop = "0.4rem";
+      reqDiv.innerHTML = `<div><strong>Join request</strong> — IP: ${
+        message.requesterIP || "unknown"
+      }</div><div style='font-size:0.9rem;color:#666'>${
+        message.ua || ""
+      }</div>`;
+      const btnAccept = document.createElement("button");
+      btnAccept.textContent = "Accept";
+      btnAccept.style.marginRight = "0.4rem";
+      btnAccept.addEventListener("click", () => {
+        websocket.send(
+          JSON.stringify({
+            type: "respondInvite",
+            requestId: message.requestId,
+            accept: true,
+          })
+        );
+        incomingRequestsDiv.removeChild(reqDiv);
+      });
+      const btnDeny = document.createElement("button");
+      btnDeny.textContent = "Deny";
+      btnDeny.addEventListener("click", () => {
+        websocket.send(
+          JSON.stringify({
+            type: "respondInvite",
+            requestId: message.requestId,
+            accept: false,
+          })
+        );
+        incomingRequestsDiv.removeChild(reqDiv);
+      });
+      const btnWrap = document.createElement("div");
+      btnWrap.style.marginTop = "0.4rem";
+      btnWrap.appendChild(btnAccept);
+      btnWrap.appendChild(btnDeny);
+      reqDiv.appendChild(btnWrap);
+      incomingRequestsDiv.appendChild(reqDiv);
+      break;
+    case "inviteRemoved":
+      // Server indicates the invite was removed (replaced/owner_disconnected/expired)
+      if (message && message.pin && currentPin === message.pin) {
+        if (pinValueSpan) pinValueSpan.textContent = "";
+        if (pinExpiresSpan)
+          pinExpiresSpan.textContent = `(${message.reason || "removed"})`;
+        if (currentPinInterval) {
+          clearInterval(currentPinInterval);
+          currentPinInterval = null;
+        }
+        currentPin = null;
+      }
+      break;
     case "textUpdateError":
       // we should really make a separate div for text update errors, instead of reusing uploadError
       // we'll just leave it for now though
@@ -511,10 +620,10 @@ websocket.onerror = (error) => {
 // --- Initial State ---
 setImageUploadEnabled(false);
 
-// new room button, just redirects to the home page again
-document.querySelectorAll(".new-room").forEach((btn) => {
-  btn.addEventListener("click", (e) => {
+// Generate PIN button (owner)
+if (generatePinBtn) {
+  generatePinBtn.addEventListener("click", (e) => {
     e.preventDefault();
-    window.location.href = "/";
+    websocket.send(JSON.stringify({ type: "generateInvite" }));
   });
-});
+}
