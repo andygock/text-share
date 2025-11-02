@@ -1,624 +1,571 @@
-// app.js
-// Real-time Text & Image Share client
-// Implements the Images Transfer Protocol (see Images-Transfer-Protocol.md)
+(() => {
+  // --- Helpers ---
+  const $ = (sel) => document.getElementById(sel);
+  const q = (sel) => document.querySelector(sel);
+  const create = (tag, props = {}, ...children) => {
+    const el = document.createElement(tag);
+    Object.assign(el, props);
+    children.forEach((c) =>
+      el.appendChild(typeof c === "string" ? document.createTextNode(c) : c)
+    );
+    return el;
+  };
+  const safeSetText = (el, txt) => {
+    if (el) el.textContent = txt;
+  };
 
-// --- DOM Elements ---
-const sharedTextarea = document.getElementById("sharedText");
-const qrcodeDiv = document.getElementById("qrcode");
-const generatePinBtn = document.getElementById("generate-pin");
-const pinValueSpan = document.getElementById("pin-value");
-const pinExpiresSpan = document.getElementById("pin-expires");
-const incomingRequestsDiv = document.getElementById("incoming-requests");
-// Track the currently shown PIN and its expiry updater so we can clear when replaced
-let currentPin = null;
-let currentPinInterval = null;
-const userCountSpan = document.getElementById("userCount");
-const userListUl = document.getElementById("userList");
-const barcodesDiv = document.querySelector(".barcodes");
-const generateBarcodesButton = document.getElementById("generate-barcodes");
-const closeBarcodesButton = document.getElementById("close-barcodes");
-const imageInput = document.getElementById("imageInput");
-const selectImageBtn = document.getElementById("selectImageBtn");
-const dropArea = document.getElementById("dropArea");
-const sharedImages = document.getElementById("sharedImages");
+  // --- DOM ---
+  const el = {
+    sharedTextarea: $("sharedText"),
+    qrcodeDiv: $("qrcode"),
+    generatePinBtn: $("generate-pin"),
+    pinValueSpan: $("pin-value"),
+    pinExpiresSpan: $("pin-expires"),
+    incomingRequestsDiv: $("incoming-requests"),
+    userCountSpan: $("userCount"),
+    userListUl: $("userList"),
+    barcodesDiv: q(".barcodes"),
+    generateBarcodesButton: $("generate-barcodes"),
+    closeBarcodesButton: $("close-barcodes"),
+    imageInput: $("imageInput"),
+    selectImageBtn: $("selectImageBtn"),
+    dropArea: $("dropArea"),
+    sharedImages: $("sharedImages"),
+    uploadStatus: $("uploadStatus"),
+    uploadError: $("uploadError"),
+    generalError: $("generalError"),
+  };
 
-const uploadStatus = document.getElementById("uploadStatus");
-const uploadError = document.getElementById("uploadError");
-const uploadProgressBar = document.getElementById("uploadProgressBar");
-const generalError = document.getElementById("generalError");
+  // Defensive extra
+  const userCountStickyNum = $("userCountStickyNum");
 
-// --- Room and WebSocket Setup ---
-const roomId = window.ROOM_ID;
-const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-const websocket = new WebSocket(
-  `${protocol}://${window.location.host}/${roomId}`
-);
+  // --- Config & State ---
+  const roomId = window.ROOM_ID;
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${protocol}://${window.location.host}/${roomId}`);
+  const MAX_IMAGE_UPLOAD_SIZE =
+    window.MAX_IMAGE_UPLOAD_SIZE || 10 * 1024 * 1024;
+  let inputHash = "";
+  let currentPin = null;
+  let currentPinInterval = null;
+  let isUploading = false;
+  let currentUploadFilename = null;
+  let userCount = 0;
 
-// --- QR Code for Room URL ---
-const currentUrl = window.location.href;
-new QRCode(qrcodeDiv, {
-  text: currentUrl,
-  width: 64,
-  height: 64,
-  colorDark: "#000",
-  colorLight: "#fff",
-  correctLevel: QRCode.CorrectLevel.M,
-});
-
-// --- Text Sync & Barcode ---
-let inputHash = "";
-function crc32(str) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < str.length; i++) {
-    crc ^= str.charCodeAt(i);
-    for (let j = 0; j < 8; j++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  // --- Utilities ---
+  function crc32(str) {
+    // small crc32 implementation (same as original)
+    let crc = 0xffffffff;
+    for (let i = 0; i < str.length; i++) {
+      crc ^= str.charCodeAt(i);
+      for (let j = 0; j < 8; j++) {
+        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+      }
     }
+    inputHash = (crc ^ 0xffffffff) >>> 0;
+    return inputHash;
   }
-  return (crc ^ 0xffffffff) >>> 0;
-}
 
-function updateHash(str) {
-  inputHash = crc32(str);
-}
+  function splitBase64IntoChunks(base64, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < base64.length; i += chunkSize)
+      chunks.push(base64.slice(i, i + chunkSize));
+    return chunks;
+  }
 
-function generateTextAreaBarcodes() {
-  const lines = sharedTextarea.value.split("\n");
-  barcodesDiv.innerHTML = "";
-  lines.forEach((line) => {
-    const trimmedLine = line.trim();
-    if (trimmedLine) {
-      const barcodeDiv = document.createElement("div");
-      barcodeDiv.className = "barcode-item";
-      barcodesDiv.appendChild(barcodeDiv);
-      new QRCode(barcodeDiv, {
-        text: trimmedLine,
-        width: 128,
-        height: 128,
+  // --- Status / Error UI ---
+  function setUploadStatus({ text = "", show = false } = {}) {
+    if (!el.uploadStatus) return;
+    el.uploadStatus.textContent = text;
+    el.uploadStatus.classList.toggle("visible", show && !!text);
+  }
+  function showUploadError(text, timeout = 2000) {
+    if (!el.uploadError) return;
+    el.uploadError.textContent = text;
+    el.uploadError.classList.add("visible");
+    setUploadStatus({ text: "", show: false });
+    setTimeout(() => {
+      el.uploadError.classList.remove("visible");
+      el.uploadError.textContent = "";
+    }, timeout);
+  }
+  function setGeneralError({ text = "", show = false, timeout = 3000 } = {}) {
+    if (!el.generalError) return;
+    el.generalError.textContent = text;
+    el.generalError.classList.toggle("visible", show && !!text);
+    if (timeout === false) return;
+    if (show && text && timeout > 0)
+      setTimeout(() => {
+        el.generalError.classList.remove("visible");
+        el.generalError.textContent = "";
+      }, timeout);
+  }
+
+  // --- QR Code for Room ---
+  if (el.qrcodeDiv) {
+    try {
+      new QRCode(el.qrcodeDiv, {
+        text: window.location.href,
+        width: 64,
+        height: 64,
         colorDark: "#000",
         colorLight: "#fff",
-        correctLevel: QRCode.CorrectLevel.H,
+        correctLevel: QRCode.CorrectLevel.M,
       });
-      const textDiv = document.createElement("div");
-      textDiv.className = "barcode-text";
-      textDiv.textContent = trimmedLine;
-      barcodeDiv.appendChild(textDiv);
+    } catch (e) {
+      /* ignore if QR lib not loaded */
     }
-  });
-}
+  }
 
-generateBarcodesButton.addEventListener("click", () => {
-  generateTextAreaBarcodes();
-  generateBarcodesButton.dataset.hash = inputHash;
-  generateBarcodesButton.disabled = true;
-  closeBarcodesButton.classList.add("visible");
-  barcodesDiv.classList.add("open");
-});
-
-closeBarcodesButton.addEventListener("click", () => {
-  barcodesDiv.innerHTML = "";
-  barcodesDiv.classList.remove("open");
-  closeBarcodesButton.classList.remove("visible");
-  generateBarcodesButton.disabled = false;
-});
-
-sharedTextarea.addEventListener("input", () => {
-  websocket.send(
-    JSON.stringify({ type: "textUpdate", text: sharedTextarea.value })
-  );
-  updateHash(sharedTextarea.value);
-  generateBarcodesButton.disabled = false;
-});
-
-// --- User List & Upload Enable ---
-let userCount = 0;
-
-// Update the H1 heading with user count for visibility
-function updateH1UserCount(count) {
-  try {
-    const el = document.getElementById("h1-user-count");
-    if (!el) return;
-    if (typeof count !== "number" || isNaN(count) || count <= 0) {
-      el.textContent = "";
+  // --- User list / UI toggles ---
+  function updateH1UserCount(count) {
+    const elH1 = $("h1-user-count");
+    if (!elH1) return;
+    if (!count || isNaN(count) || count <= 0) {
+      elH1.textContent = "";
+      elH1.classList.remove("green");
       return;
     }
-    const usersText =
-      count === 1 ? "1 user connected" : `${count} users connected`;
-    el.textContent = `(${usersText})`;
-
-    // if more than 1 user, add class "green" for green text
-    if (count > 1) {
-      el.classList.add("green");
+    elH1.textContent = `(${
+      count === 1 ? "1 user connected" : `${count} users connected`
+    })`;
+    elH1.classList.toggle("green", count > 1);
+  }
+  function setImageUploadEnabled(enabled) {
+    if (el.imageInput) el.imageInput.disabled = !enabled;
+    if (el.selectImageBtn) el.selectImageBtn.disabled = !enabled;
+    if (el.dropArea) el.dropArea.classList.toggle("drop-disabled", !enabled);
+    const infoId = "image-upload-info-msg";
+    const parent = $("image-share");
+    let infoMsg = infoId && document.getElementById(infoId);
+    if (!enabled) {
+      if (el.dropArea)
+        el.dropArea.title =
+          "You must have at least 2 users in the room to upload images.";
+      if (el.selectImageBtn)
+        el.selectImageBtn.title =
+          "You must have at least 2 users in the room to upload images.";
+      if (!infoMsg && parent) {
+        infoMsg = create(
+          "div",
+          { id: infoId, className: "image-upload-info" },
+          document.createTextNode(
+            "You cannot upload images because there is no one else connected to this room."
+          )
+        );
+        parent.insertBefore(infoMsg, el.sharedImages);
+      } else if (infoMsg) infoMsg.classList.add("visible");
     } else {
-      el.classList.remove("green");
+      if (el.dropArea) el.dropArea.title = "";
+      if (el.selectImageBtn) el.selectImageBtn.title = "Select Image";
+      if (infoMsg) infoMsg.classList.remove("visible");
     }
-  } catch (e) {
-    // ignore
-  }
-}
-
-function setImageUploadEnabled(enabled) {
-  imageInput.disabled = !enabled;
-  selectImageBtn.disabled = !enabled;
-  dropArea.classList.toggle("drop-disabled", !enabled);
-
-  const infoMsgId = "image-upload-info-msg";
-  let infoMsg = document.getElementById(infoMsgId);
-  if (!enabled) {
-    dropArea.title =
-      "You must have at least 2 users in the room to upload images.";
-    selectImageBtn.title =
-      "You must have at least 2 users in the room to upload images.";
-    if (!infoMsg) {
-      infoMsg = document.createElement("div");
-      infoMsg.id = infoMsgId;
-      infoMsg.className = "image-upload-info";
-      infoMsg.textContent =
-        "You cannot upload images because there is no one else connected to this room.";
-      document
-        .getElementById("image-share")
-        .insertBefore(infoMsg, sharedImages);
-    } else {
-      infoMsg.classList.add("visible");
-    }
-  } else {
-    dropArea.title = "";
-    selectImageBtn.title = "Select Image";
-    if (infoMsg) infoMsg.classList.remove("visible");
-  }
-}
-
-function updateUserList(users) {
-  userListUl.innerHTML = "";
-  users.forEach((ip) => addUserToList(ip));
-  userCountSpan.textContent = users.length;
-  userCount = users.length;
-  setImageUploadEnabled(userCount > 1);
-  updateH1UserCount(userCount);
-}
-
-function addUser(ip) {
-  addUserToList(ip);
-  userCount = parseInt(userCountSpan.textContent) + 1;
-  userCountSpan.textContent = userCount;
-  setImageUploadEnabled(userCount > 1);
-  updateH1UserCount(userCount);
-}
-
-function removeUser(ip) {
-  removeUserFromList(ip);
-  userCount = parseInt(userCountSpan.textContent) - 1;
-  userCountSpan.textContent = userCount;
-  setImageUploadEnabled(userCount > 1);
-  updateH1UserCount(userCount);
-}
-
-function addUserToList(ip) {
-  const li = document.createElement("li");
-  li.textContent = ip;
-  li.dataset.ip = ip;
-  userListUl.appendChild(li);
-}
-
-function removeUserFromList(ip) {
-  const userLi = userListUl.querySelector(`li[data-ip="${ip}"]`);
-  if (userLi) {
-    userListUl.removeChild(userLi);
-  }
-}
-
-// --- Images Transfer Protocol (see Images-Transfer-Protocol.md) ---
-// Handles: imageUploadStart, imageUploadChunk, imageUploadProgress, imageUploadComplete, imageUploadError
-let incomingImage = null;
-let incomingChunks = [];
-let incomingTotalChunks = 0;
-let incomingFilename = "";
-let incomingMimeType = "";
-let isUploading = false;
-let currentUploadFilename = null;
-
-websocket.onmessage = (event) => {
-  let message;
-  try {
-    message = JSON.parse(event.data);
-  } catch {
-    return;
   }
 
-  switch (message.type) {
-    case "textUpdate":
-      sharedTextarea.value = message.text;
-      updateHash(message.text);
-      generateBarcodesButton.disabled = false;
-      break;
-    case "userList":
-      updateUserList(message.users);
-      break;
-    case "userConnected":
-      addUser(message.ip);
-      break;
-    case "userDisconnected":
-      removeUser(message.ip);
-      break;
-    case "imageUploadStart":
-      // Protocol: Step 1 (see protocol doc)
-      incomingImage = null;
+  function addUserToList(ip) {
+    if (!el.userListUl) return;
+    const li = create("li", {}, document.createTextNode(ip));
+    li.dataset.ip = ip;
+    el.userListUl.appendChild(li);
+  }
+  function removeUserFromList(ip) {
+    if (!el.userListUl) return;
+    const li = el.userListUl.querySelector(`li[data-ip="${ip}"]`);
+    if (li) el.userListUl.removeChild(li);
+  }
+  function updateUserList(users = []) {
+    if (!el.userListUl) return;
+    el.userListUl.innerHTML = "";
+    users.forEach(addUserToList);
+    userCount = users.length;
+    if (el.userCountSpan) el.userCountSpan.textContent = users.length;
+    if (userCountStickyNum) userCountStickyNum.textContent = `${users.length}`;
+    setImageUploadEnabled(userCount > 1);
+    updateH1UserCount(userCount);
+  }
+  function addUser(ip) {
+    addUserToList(ip);
+    userCount = (parseInt(el.userCountSpan?.textContent || "0", 10) || 0) + 1;
+    if (el.userCountSpan) el.userCountSpan.textContent = userCount;
+    if (userCountStickyNum) userCountStickyNum.textContent = `${userCount}`;
+    setImageUploadEnabled(userCount > 1);
+    updateH1UserCount(userCount);
+  }
+  function removeUser(ip) {
+    removeUserFromList(ip);
+    userCount = Math.max(
+      0,
+      (parseInt(el.userCountSpan?.textContent || "0", 10) || 0) - 1
+    );
+    if (el.userCountSpan) el.userCountSpan.textContent = userCount;
+    if (userCountStickyNum) userCountStickyNum.textContent = `${userCount}`;
+    setImageUploadEnabled(userCount > 1);
+    updateH1UserCount(userCount);
+  }
+
+  // --- Barcodes ---
+  function generateTextAreaBarcodes() {
+    if (!el.sharedTextarea || !el.barcodesDiv) return;
+    const lines = el.sharedTextarea.value.split("\n");
+    el.barcodesDiv.innerHTML = "";
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const item = create("div", { className: "barcode-item" });
+      el.barcodesDiv.appendChild(item);
+      try {
+        new QRCode(item, {
+          text: trimmed,
+          width: 128,
+          height: 128,
+          colorDark: "#000",
+          colorLight: "#fff",
+          correctLevel: QRCode.CorrectLevel.H,
+        });
+      } catch (e) {
+        /* ignore */
+      }
+      const txt = create(
+        "div",
+        { className: "barcode-text" },
+        document.createTextNode(trimmed)
+      );
+      item.appendChild(txt);
+    });
+  }
+
+  if (el.generateBarcodesButton) {
+    el.generateBarcodesButton.addEventListener("click", () => {
+      generateTextAreaBarcodes();
+      el.generateBarcodesButton.dataset.hash = inputHash;
+      el.generateBarcodesButton.disabled = true;
+      el.closeBarcodesButton?.classList.add("visible");
+      el.barcodesDiv?.classList.add("open");
+    });
+  }
+  el.closeBarcodesButton?.addEventListener("click", () => {
+    if (el.barcodesDiv) el.barcodesDiv.innerHTML = "";
+    el.barcodesDiv?.classList.remove("open");
+    el.closeBarcodesButton?.classList.remove("visible");
+    if (el.generateBarcodesButton) el.generateBarcodesButton.disabled = false;
+  });
+
+  // --- Text sync ---
+  el.sharedTextarea?.addEventListener("input", () => {
+    try {
+      ws.send(
+        JSON.stringify({ type: "textUpdate", text: el.sharedTextarea.value })
+      );
+    } catch (e) {}
+    crc32(el.sharedTextarea.value);
+    if (el.generateBarcodesButton) el.generateBarcodesButton.disabled = false;
+  });
+
+  // --- Images Transfer Protocol (incoming state) ---
+  let incomingFilename = "";
+  let incomingMimeType = "";
+  let incomingChunks = [];
+  let incomingTotalChunks = 0;
+
+  // --- Message handlers (map instead of big switch) ---
+  const handlers = {
+    textUpdate: (m) => {
+      if (!el.sharedTextarea) return;
+      el.sharedTextarea.value = m.text || "";
+      crc32(el.sharedTextarea.value);
+      if (el.generateBarcodesButton) el.generateBarcodesButton.disabled = false;
+    },
+    userList: (m) => updateUserList(m.users || []),
+    userConnected: (m) => addUser(m.ip),
+    userDisconnected: (m) => removeUser(m.ip),
+    imageUploadStart: (m) => {
+      incomingFilename = m.filename || "";
+      incomingMimeType = m.mimeType || "";
       incomingChunks = [];
       incomingTotalChunks = 0;
-      incomingFilename = message.filename;
-      incomingMimeType = message.mimeType;
       setUploadStatus({
         text: `Receiving image: ${incomingFilename}`,
         show: true,
       });
-      break;
-    case "imageUploadChunk":
-      // Protocol: Step 2/4 (see protocol doc)
-      if (message.filename !== incomingFilename) return;
-      incomingChunks[message.chunkIndex] = message.data;
-      incomingTotalChunks = message.totalChunks;
-      break;
-    case "imageUploadProgress":
-      // Protocol: Step 5 (see protocol doc)
-      // Only show receive progress if not uploading this file
+    },
+    imageUploadChunk: (m) => {
+      if (m.filename !== incomingFilename) return;
+      incomingChunks[m.chunkIndex] = m.data;
+      incomingTotalChunks = m.totalChunks || incomingTotalChunks;
+    },
+    imageUploadProgress: (m) => {
       if (
-        message.filename === incomingFilename &&
-        (!isUploading || message.filename !== currentUploadFilename)
+        m.filename === incomingFilename &&
+        (!isUploading || m.filename !== currentUploadFilename)
       ) {
-        setUploadStatus({
-          text: `Receiving... ${message.progress}%`,
-          show: true,
-        });
+        setUploadStatus({ text: `Receiving... ${m.progress}%`, show: true });
       }
-      break;
-    case "imageUploadComplete":
-      // Protocol: Step 6 (see protocol doc)
-      if (message.filename !== incomingFilename) return;
-      const base64 = message.data;
-      const img = document.createElement("img");
-      img.src = `data:${message.mimeType};base64,${base64}`;
-      img.alt = message.filename;
-      img.title = `${message.filename} (${message.width}x${
-        message.height
-      }, ${Math.ceil(message.size / 1024)}kB)`;
-      // sizing handled by stylesheet
-      const info = document.createElement("div");
-      info.textContent = `${message.filename} (${message.width}x${
-        message.height
-      }, ${Math.ceil(message.size / 1024)}kB)`;
-      const wrapper = document.createElement("div");
-      wrapper.className = "shared-image-item";
-      wrapper.appendChild(img);
-      wrapper.appendChild(info);
-      sharedImages.appendChild(wrapper);
+    },
+    imageUploadComplete: (m) => {
+      if (m.filename !== incomingFilename) return;
+      const base64 = m.data || "";
+      const img = create("img", {
+        src: `data:${m.mimeType};base64,${base64}`,
+        alt: m.filename,
+        title: `${m.filename} (${m.width}x${m.height}, ${Math.ceil(
+          m.size / 1024
+        )}kB)`,
+      });
+      const info = create(
+        "div",
+        {},
+        document.createTextNode(
+          `${m.filename} (${m.width}x${m.height}, ${Math.ceil(
+            m.size / 1024
+          )}kB)`
+        )
+      );
+      const wrap = create("div", { className: "shared-image-item" });
+      wrap.appendChild(img);
+      wrap.appendChild(info);
+      el.sharedImages?.appendChild(wrap);
       setUploadStatus({ text: "Image received.", show: true });
       setTimeout(() => setUploadStatus({ text: "", show: false }), 2000);
-      incomingImage = null;
+      incomingFilename = "";
       incomingChunks = [];
       incomingTotalChunks = 0;
-      incomingFilename = "";
       incomingMimeType = "";
-      break;
-    case "imageUploadError":
-      // Protocol: Step 7 (see protocol doc)
-      // console.log("Image upload error:", message.error);
-      setUploadError({
-        text: `Error uploading image: ${message.error}`,
-        show: true,
-      });
-      break;
-    case "inviteGenerated":
-      // Clear any previous pin interval/display so we only show one active pin per client
+    },
+    imageUploadError: (m) =>
+      showUploadError(`Error uploading image: ${m.error || "unknown"}`),
+    inviteGenerated: (m) => {
       if (currentPinInterval) {
         clearInterval(currentPinInterval);
         currentPinInterval = null;
       }
-      currentPin = message.pin;
-      if (pinValueSpan) {
-        pinValueSpan.textContent = message.pin;
-      }
-      if (pinExpiresSpan) {
-        const msLeft = Math.max(0, message.expiresAt - Date.now());
+      currentPin = m.pin;
+      safeSetText(el.pinValueSpan, m.pin || "");
+      if (el.pinExpiresSpan) {
+        let msLeft = Math.max(0, (m.expiresAt || 0) - Date.now());
         let seconds = Math.floor(msLeft / 1000);
-        pinExpiresSpan.textContent = `Expires in ${seconds}s`;
-        // update countdown every second
+        el.pinExpiresSpan.textContent = `Expires in ${seconds}s`;
         currentPinInterval = setInterval(() => {
           seconds -= 1;
           if (seconds <= 0) {
-            pinExpiresSpan.textContent = "(expired)";
-            if (pinValueSpan && pinValueSpan.textContent === currentPin) {
-              pinValueSpan.textContent = "";
-            }
+            el.pinExpiresSpan.textContent = "(expired)";
+            if (el.pinValueSpan && el.pinValueSpan.textContent === currentPin)
+              el.pinValueSpan.textContent = "";
             clearInterval(currentPinInterval);
             currentPinInterval = null;
             currentPin = null;
             return;
           }
-          pinExpiresSpan.textContent = `Expires in ${seconds}s`;
+          el.pinExpiresSpan.textContent = `Expires in ${seconds}s`;
         }, 1000);
       }
-      break;
-    case "inviteExpired":
-      // Only clear if this maps to the currently displayed PIN
-      if (currentPin && message.pin === currentPin) {
-        if (pinValueSpan) pinValueSpan.textContent = "";
-        if (pinExpiresSpan) pinExpiresSpan.textContent = "(expired)";
+    },
+    inviteExpired: (m) => {
+      if (currentPin && m.pin === currentPin) {
+        safeSetText(el.pinValueSpan, "");
+        if (el.pinExpiresSpan) el.pinExpiresSpan.textContent = "(expired)";
         if (currentPinInterval) {
           clearInterval(currentPinInterval);
           currentPinInterval = null;
         }
         currentPin = null;
       }
-      break;
-    case "joinRequest":
-      // show incoming request in owner's UI
-      if (!incomingRequestsDiv) break;
-      const reqDiv = document.createElement("div");
-      reqDiv.className = "incoming-request-item";
-      reqDiv.dataset.requestId = message.requestId;
+    },
+    inviteRemoved: (m) => {
+      if (m && m.pin && currentPin === m.pin) {
+        safeSetText(el.pinValueSpan, "");
+        if (el.pinExpiresSpan)
+          el.pinExpiresSpan.textContent = `(${m.reason || "removed"})`;
+        if (currentPinInterval) {
+          clearInterval(currentPinInterval);
+          currentPinInterval = null;
+        }
+        currentPin = null;
+      }
+    },
+    joinRequest: (m) => {
+      if (!el.incomingRequestsDiv) return;
+      const reqDiv = create("div", { className: "incoming-request-item" });
+      reqDiv.dataset.requestId = m.requestId || "";
       reqDiv.innerHTML = `<div><strong>Join request</strong> — IP: ${
-        message.requesterIP || "unknown"
-      }</div><div class='incoming-request-ua'>${message.ua || ""}</div>`;
-      const btnAccept = document.createElement("button");
-      btnAccept.textContent = "Accept";
-      btnAccept.className = "accept-btn";
+        m.requesterIP || "unknown"
+      }</div><div class='incoming-request-ua'>${m.ua || ""}</div>`;
+      const btnAccept = create(
+        "button",
+        { className: "accept-btn" },
+        document.createTextNode("Accept")
+      );
       btnAccept.addEventListener("click", () => {
-        websocket.send(
-          JSON.stringify({
-            type: "respondInvite",
-            requestId: message.requestId,
-            accept: true,
-          })
-        );
-        incomingRequestsDiv.removeChild(reqDiv);
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "respondInvite",
+              requestId: m.requestId,
+              accept: true,
+            })
+          );
+        } catch (e) {}
+        el.incomingRequestsDiv.removeChild(reqDiv);
       });
-      const btnDeny = document.createElement("button");
-      btnDeny.textContent = "Deny";
+      const btnDeny = create("button", {}, document.createTextNode("Deny"));
       btnDeny.addEventListener("click", () => {
-        websocket.send(
-          JSON.stringify({
-            type: "respondInvite",
-            requestId: message.requestId,
-            accept: false,
-          })
-        );
-        incomingRequestsDiv.removeChild(reqDiv);
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "respondInvite",
+              requestId: m.requestId,
+              accept: false,
+            })
+          );
+        } catch (e) {}
+        el.incomingRequestsDiv.removeChild(reqDiv);
       });
-      const btnWrap = document.createElement("div");
-      btnWrap.className = "incoming-request-buttons";
+      const btnWrap = create("div", { className: "incoming-request-buttons" });
       btnWrap.appendChild(btnAccept);
       btnWrap.appendChild(btnDeny);
       reqDiv.appendChild(btnWrap);
-      incomingRequestsDiv.appendChild(reqDiv);
-      break;
-    case "inviteRemoved":
-      // Server indicates the invite was removed (replaced/owner_disconnected/expired)
-      if (message && message.pin && currentPin === message.pin) {
-        if (pinValueSpan) pinValueSpan.textContent = "";
-        if (pinExpiresSpan)
-          pinExpiresSpan.textContent = `(${message.reason || "removed"})`;
-        if (currentPinInterval) {
-          clearInterval(currentPinInterval);
-          currentPinInterval = null;
-        }
-        currentPin = null;
-      }
-      break;
-    case "textUpdateError":
-      // we should really make a separate div for text update errors, instead of reusing uploadError
-      // we'll just leave it for now though
-      setUploadError({
-        text: message.error || "Text update rate limit exceeded.",
-        show: true,
-      });
-      break;
-  }
-};
+      el.incomingRequestsDiv.appendChild(reqDiv);
+    },
+    textUpdateError: (m) =>
+      showUploadError(m.error || "Text update rate limit exceeded."),
+  };
 
-// --- Image Upload (Protocol Steps 1-2) ---
-function splitBase64IntoChunks(base64, chunkSize) {
-  const chunks = [];
-  for (let i = 0; i < base64.length; i += chunkSize) {
-    chunks.push(base64.slice(i, i + chunkSize));
-  }
-  return chunks;
-}
-
-async function uploadImage(file) {
-  isUploading = true;
-  currentUploadFilename = file.name;
-  setUploadStatus({ text: "Processing image...", show: true });
-  const arrayBuffer = await file.arrayBuffer();
-  websocket.send(
-    JSON.stringify({
-      type: "imageUploadStart",
-      filename: file.name,
-      mimeType: file.type,
-      size: file.size,
-    })
-  );
-  const base64 = btoa(
-    new Uint8Array(arrayBuffer).reduce(
-      (data, byte) => data + String.fromCharCode(byte),
-      ""
-    )
-  );
-  const chunkSize = 32 * 1024;
-  const chunks = splitBase64IntoChunks(base64, chunkSize);
-  for (let i = 0; i < chunks.length; i++) {
-    websocket.send(
-      JSON.stringify({
-        type: "imageUploadChunk",
-        filename: file.name,
-        chunkIndex: i,
-        totalChunks: chunks.length,
-        data: chunks[i],
-      })
-    );
-    if (uploadError.classList.contains("visible")) {
-      continue;
+  ws.onmessage = (ev) => {
+    let m;
+    try {
+      m = JSON.parse(ev.data);
+    } catch (e) {
+      return;
     }
-    const percent = Math.round(((i + 1) / chunks.length) * 100);
-    setUploadStatus({ text: `Uploading... ${percent}%`, show: true });
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  isUploading = false;
-  currentUploadFilename = null;
-}
+    const h = handlers[m.type];
+    if (h)
+      try {
+        h(m);
+      } catch (e) {
+        console.error("handler error", e);
+      }
+  };
 
-// Max image upload size in bytes (from backend, fallback 10MB)
-const MAX_IMAGE_UPLOAD_SIZE = window.MAX_IMAGE_UPLOAD_SIZE || 10 * 1024 * 1024;
-
-function showUploadError(msg) {
-  uploadError.textContent = msg;
-  uploadError.classList.add("visible");
-
-  // clear upload status percentages too as they may be misleading, clear text and styles
-  clearUploadStatusStyles();
-  uploadStatus.textContent = "";
-
-  setTimeout(() => {
-    uploadError.classList.remove("visible");
-    uploadError.textContent = "";
-  }, 2000);
-}
-
-// --- Upload Status & Error Handling Utilities ---
-function setUploadStatus({ text = "", show = false } = {}) {
-  uploadStatus.textContent = text;
-  uploadStatus.classList.toggle("visible", show && !!text);
-}
-
-function setUploadError({ text = "", show = false, timeout = 2000 } = {}) {
-  uploadError.textContent = text;
-  uploadError.classList.toggle("visible", show && !!text);
-  if (show && text) {
+  ws.onopen = () => console.log("WebSocket connection opened");
+  ws.onclose = () => console.log("WebSocket connection closed");
+  ws.onerror = (err) => {
+    console.error("WebSocket error:", err);
+    if (el.userListUl) el.userListUl.innerHTML = "";
+    userCount = 0;
+    if (el.userCountSpan) el.userCountSpan.textContent = "0";
+    if (userCountStickyNum) userCountStickyNum.textContent = "0";
+    setImageUploadEnabled(false);
     setUploadStatus({ text: "", show: false });
-    setTimeout(() => {
-      uploadError.classList.remove("visible");
-      uploadError.textContent = "";
-    }, timeout);
-  }
-}
-
-function setGeneralError({ text = "", show = false, timeout = 3000 } = {}) {
-  generalError.textContent = text;
-  generalError.classList.toggle("visible", show && !!text);
-
-  // If timeout is false, do not auto-hide the message; it will stay until this function is called again
-  if (timeout === false) {
-    return;
-  }
-
-  if (show && text && timeout > 0) {
-    setTimeout(() => {
-      generalError.classList.remove("visible");
-      generalError.textContent = "";
-    }, timeout);
-  }
-}
-
-// Remove error styling from uploadStatus if present
-function clearUploadStatusStyles() {
-  uploadStatus.style.background = "";
-  uploadStatus.style.color = "";
-  uploadStatus.style.border = "";
-  uploadStatus.style.fontWeight = "";
-}
-
-function handleFileUpload(file) {
-  if (isUploading) {
-    setUploadError({
-      text: "Only one file upload is allowed at a time. Please wait for the current upload to finish.",
+    setGeneralError({
+      text: "Connection error. Please refresh the page.",
       show: true,
+      timeout: false,
     });
-    return;
+  };
+
+  // --- Upload logic ---
+  async function uploadImage(file) {
+    isUploading = true;
+    currentUploadFilename = file.name;
+    setUploadStatus({ text: "Processing image...", show: true });
+
+    const arrayBuffer = await file.arrayBuffer();
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "imageUploadStart",
+          filename: file.name,
+          mimeType: file.type,
+          size: file.size,
+        })
+      );
+    } catch (e) {}
+
+    // base64 encode
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const chunkSize = 32 * 1024;
+    const chunks = splitBase64IntoChunks(base64, chunkSize);
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "imageUploadChunk",
+            filename: file.name,
+            chunkIndex: i,
+            totalChunks: chunks.length,
+            data: chunks[i],
+          })
+        );
+      } catch (e) {}
+      if (el.uploadError && el.uploadError.classList.contains("visible")) {
+        // leave loop but continue sending? original continued, preserve same behavior by continuing
+      }
+      const percent = Math.round(((i + 1) / chunks.length) * 100);
+      setUploadStatus({ text: `Uploading... ${percent}%`, show: true });
+      // throttle to keep UI responsive & match original behavior
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    isUploading = false;
+    currentUploadFilename = null;
   }
-  if (file.size > MAX_IMAGE_UPLOAD_SIZE) {
-    setUploadError({
-      text: `File too large. Max allowed is ${Math.floor(
-        MAX_IMAGE_UPLOAD_SIZE / 1024 / 1024
-      )}MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB.`,
-      show: true,
+
+  function handleFileUpload(file) {
+    if (isUploading)
+      return showUploadError(
+        "Only one file upload is allowed at a time. Please wait for the current upload to finish."
+      );
+    if (file.size > MAX_IMAGE_UPLOAD_SIZE)
+      return showUploadError(
+        `File too large. Max allowed is ${Math.floor(
+          MAX_IMAGE_UPLOAD_SIZE / 1024 / 1024
+        )}MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB.`
+      );
+    uploadImage(file).catch((err) => {
+      console.error("upload error", err);
+      showUploadError("Upload failed.");
+      isUploading = false;
+      currentUploadFilename = null;
     });
-    return;
   }
-  uploadImage(file);
-}
 
-selectImageBtn.addEventListener("click", () => imageInput.click());
+  // --- File input / drag & drop ---
+  if (el.selectImageBtn)
+    el.selectImageBtn.addEventListener("click", () => el.imageInput?.click());
+  el.imageInput?.removeAttribute("multiple");
+  el.imageInput?.addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    handleFileUpload(f);
+  });
 
-imageInput.addEventListener("change", (e) => {
-  if (isUploading) {
-    setUploadError({
-      text: "Only one file upload is allowed at a time. Please wait for the current upload to finish.",
-      show: true,
+  if (el.dropArea) {
+    el.dropArea.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      el.dropArea.classList.add("dragover");
     });
-    return;
-  }
-  if (e.target.files && e.target.files[0]) {
-    handleFileUpload(e.target.files[0]);
-  }
-});
-
-dropArea.addEventListener("drop", (e) => {
-  e.preventDefault();
-  dropArea.classList.remove("dragover");
-  if (isUploading) {
-    setUploadError({
-      text: "Only one file upload is allowed at a time. Please wait for the current upload to finish.",
-      show: true,
+    el.dropArea.addEventListener("dragleave", () =>
+      el.dropArea.classList.remove("dragover")
+    );
+    el.dropArea.addEventListener("drop", (e) => {
+      e.preventDefault();
+      el.dropArea.classList.remove("dragover");
+      const f = e.dataTransfer?.files && e.dataTransfer.files[0];
+      if (!f) return;
+      handleFileUpload(f);
     });
-    return;
   }
-  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-    handleFileUpload(e.dataTransfer.files[0]);
-  }
-});
 
-dropArea.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  dropArea.classList.add("dragover");
-});
+  // --- Incoming requests delegation removal (if owner wants to remove by button) ---
+  // Note: we already attach click handlers to created Accept/Deny buttons.
 
-dropArea.addEventListener("dragleave", () =>
-  dropArea.classList.remove("dragover")
-);
+  // --- Generate pin (owner) ---
+  if (el.generatePinBtn)
+    el.generatePinBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      try {
+        ws.send(JSON.stringify({ type: "generateInvite" }));
+      } catch (err) {}
+    });
 
-// Ensure only one file can be selected in case the attribute is ever changed
-imageInput.removeAttribute("multiple");
-
-// --- WebSocket Connection Events ---
-websocket.onopen = () => {
-  console.log("WebSocket connection opened");
-};
-
-websocket.onclose = () => {
-  console.log("WebSocket connection closed");
-};
-
-websocket.onerror = (error) => {
-  console.error("WebSocket error:", error);
-  userListUl.innerHTML = "";
-  userCount = 0;
-  userCountSpan.textContent = "0";
-  userCountStickyNum.textContent = "0";
+  // --- Initial state ---
   setImageUploadEnabled(false);
-  setUploadStatus({ text: "", show: false });
-  setGeneralError({
-    text: "Connection error. Please refresh the page.",
-    show: true,
-    timeout: false,
-  });
-};
-
-// --- Initial State ---
-setImageUploadEnabled(false);
-
-// Generate PIN button (owner)
-if (generatePinBtn) {
-  generatePinBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    websocket.send(JSON.stringify({ type: "generateInvite" }));
-  });
-}
+})();
