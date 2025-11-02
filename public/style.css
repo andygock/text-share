@@ -376,3 +376,11 @@ textarea {
 #text-content {
   flex: 1;
 }
+
+/* small helper for H1 user count badge */
+.h1-user-count {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: #666;
+  margin-left: 0.5rem;
+}

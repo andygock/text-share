@@ -114,6 +114,23 @@ sharedTextarea.addEventListener("input", () => {
 // --- User List & Upload Enable ---
 let userCount = 0;
 
+// Update the H1 heading with user count for visibility
+function updateH1UserCount(count) {
+  try {
+    const el = document.getElementById("h1-user-count");
+    if (!el) return;
+    if (typeof count !== "number" || isNaN(count) || count <= 0) {
+      el.textContent = "";
+      return;
+    }
+    const usersText =
+      count === 1 ? "1 user connected" : `${count} users connected`;
+    el.textContent = `(${usersText})`;
+  } catch (e) {
+    // ignore
+  }
+}
+
 function setImageUploadEnabled(enabled) {
   imageInput.disabled = !enabled;
   selectImageBtn.disabled = !enabled;
@@ -162,6 +179,7 @@ function updateUserList(users) {
   } else {
     userCountSticky.classList.remove("active");
   }
+  updateH1UserCount(userCount);
 }
 
 function addUser(ip) {
@@ -176,6 +194,7 @@ function addUser(ip) {
   } else {
     userCountSticky.classList.remove("active");
   }
+  updateH1UserCount(userCount);
 }
 
 function removeUser(ip) {
@@ -190,6 +209,7 @@ function removeUser(ip) {
   } else {
     userCountSticky.classList.remove("active");
   }
+  updateH1UserCount(userCount);
 }
 
 function addUserToList(ip) {
