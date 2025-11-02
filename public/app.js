@@ -13,7 +13,6 @@ const incomingRequestsDiv = document.getElementById("incoming-requests");
 let currentPin = null;
 let currentPinInterval = null;
 const userCountSpan = document.getElementById("userCount");
-const userCountStickyNum = document.getElementById("userCountStickyNum");
 const userListUl = document.getElementById("userList");
 const barcodesDiv = document.querySelector(".barcodes");
 const generateBarcodesButton = document.getElementById("generate-barcodes");
@@ -166,15 +165,8 @@ function updateUserList(users) {
   userListUl.innerHTML = "";
   users.forEach((ip) => addUserToList(ip));
   userCountSpan.textContent = users.length;
-  userCountStickyNum.textContent = users.length;
   userCount = users.length;
   setImageUploadEnabled(userCount > 1);
-  const userCountSticky = document.getElementById("userCountSticky");
-  if (userCount >= 2) {
-    userCountSticky.classList.add("active");
-  } else {
-    userCountSticky.classList.remove("active");
-  }
   updateH1UserCount(userCount);
 }
 
@@ -182,14 +174,7 @@ function addUser(ip) {
   addUserToList(ip);
   userCount = parseInt(userCountSpan.textContent) + 1;
   userCountSpan.textContent = userCount;
-  userCountStickyNum.textContent = userCount;
   setImageUploadEnabled(userCount > 1);
-  const userCountSticky = document.getElementById("userCountSticky");
-  if (userCount >= 2) {
-    userCountSticky.classList.add("active");
-  } else {
-    userCountSticky.classList.remove("active");
-  }
   updateH1UserCount(userCount);
 }
 
@@ -197,14 +182,7 @@ function removeUser(ip) {
   removeUserFromList(ip);
   userCount = parseInt(userCountSpan.textContent) - 1;
   userCountSpan.textContent = userCount;
-  userCountStickyNum.textContent = userCount;
   setImageUploadEnabled(userCount > 1);
-  const userCountSticky = document.getElementById("userCountSticky");
-  if (userCount >= 2) {
-    userCountSticky.classList.add("active");
-  } else {
-    userCountSticky.classList.remove("active");
-  }
   updateH1UserCount(userCount);
 }
 
