@@ -92,14 +92,14 @@ generateBarcodesButton.addEventListener("click", () => {
   generateTextAreaBarcodes();
   generateBarcodesButton.dataset.hash = inputHash;
   generateBarcodesButton.disabled = true;
-  closeBarcodesButton.style.display = "inline-block";
-  barcodesDiv.style.display = "block";
+  closeBarcodesButton.classList.add("visible");
+  barcodesDiv.classList.add("open");
 });
 
 closeBarcodesButton.addEventListener("click", () => {
   barcodesDiv.innerHTML = "";
-  barcodesDiv.style.display = "none";
-  closeBarcodesButton.style.display = "none";
+  barcodesDiv.classList.remove("open");
+  closeBarcodesButton.classList.remove("visible");
   generateBarcodesButton.disabled = false;
 });
 
@@ -134,8 +134,7 @@ function updateH1UserCount(count) {
 function setImageUploadEnabled(enabled) {
   imageInput.disabled = !enabled;
   selectImageBtn.disabled = !enabled;
-  dropArea.style.pointerEvents = enabled ? "auto" : "none";
-  dropArea.style.opacity = enabled ? "1" : "0.5";
+  dropArea.classList.toggle("drop-disabled", !enabled);
 
   const infoMsgId = "image-upload-info-msg";
   let infoMsg = document.getElementById(infoMsgId);
@@ -147,22 +146,19 @@ function setImageUploadEnabled(enabled) {
     if (!infoMsg) {
       infoMsg = document.createElement("div");
       infoMsg.id = infoMsgId;
-      infoMsg.style.color = "#a94442";
-      infoMsg.style.fontSize = "0.95rem";
-      infoMsg.style.margin = "0.5rem 0 0.5rem 0";
-      infoMsg.style.textAlign = "center";
+      infoMsg.className = "image-upload-info";
       infoMsg.textContent =
         "You cannot upload images because there is no one else connected to this room.";
       document
         .getElementById("image-share")
         .insertBefore(infoMsg, sharedImages);
     } else {
-      infoMsg.style.display = "block";
+      infoMsg.classList.add("visible");
     }
   } else {
     dropArea.title = "";
     selectImageBtn.title = "Select Image";
-    if (infoMsg) infoMsg.style.display = "none";
+    if (infoMsg) infoMsg.classList.remove("visible");
   }
 }
 
@@ -300,8 +296,7 @@ websocket.onmessage = (event) => {
       img.title = `${message.filename} (${message.width}x${
         message.height
       }, ${Math.ceil(message.size / 1024)}kB)`;
-      img.style.maxWidth = "100%";
-      img.style.maxHeight = "300px";
+      // sizing handled by stylesheet
       const info = document.createElement("div");
       info.textContent = `${message.filename} (${message.width}x${
         message.height
@@ -376,17 +371,12 @@ websocket.onmessage = (event) => {
       const reqDiv = document.createElement("div");
       reqDiv.className = "incoming-request-item";
       reqDiv.dataset.requestId = message.requestId;
-      reqDiv.style.border = "1px solid #ddd";
-      reqDiv.style.padding = "0.4rem";
-      reqDiv.style.marginTop = "0.4rem";
       reqDiv.innerHTML = `<div><strong>Join request</strong> — IP: ${
         message.requesterIP || "unknown"
-      }</div><div style='font-size:0.9rem;color:#666'>${
-        message.ua || ""
-      }</div>`;
+      }</div><div class='incoming-request-ua'>${message.ua || ""}</div>`;
       const btnAccept = document.createElement("button");
       btnAccept.textContent = "Accept";
-      btnAccept.style.marginRight = "0.4rem";
+      btnAccept.className = "accept-btn";
       btnAccept.addEventListener("click", () => {
         websocket.send(
           JSON.stringify({
@@ -410,7 +400,7 @@ websocket.onmessage = (event) => {
         incomingRequestsDiv.removeChild(reqDiv);
       });
       const btnWrap = document.createElement("div");
-      btnWrap.style.marginTop = "0.4rem";
+      btnWrap.className = "incoming-request-buttons";
       btnWrap.appendChild(btnAccept);
       btnWrap.appendChild(btnDeny);
       reqDiv.appendChild(btnWrap);
@@ -480,7 +470,7 @@ async function uploadImage(file) {
         data: chunks[i],
       })
     );
-    if (uploadError.style.display === "block") {
+    if (uploadError.classList.contains("visible")) {
       continue;
     }
     const percent = Math.round(((i + 1) / chunks.length) * 100);
@@ -495,15 +485,15 @@ async function uploadImage(file) {
 const MAX_IMAGE_UPLOAD_SIZE = window.MAX_IMAGE_UPLOAD_SIZE || 10 * 1024 * 1024;
 
 function showUploadError(msg) {
-  uploadError.style.display = "block";
   uploadError.textContent = msg;
+  uploadError.classList.add("visible");
 
   // clear upload status percentages too as they may be misleading, clear text and styles
   clearUploadStatusStyles();
   uploadStatus.textContent = "";
 
   setTimeout(() => {
-    uploadError.style.display = "none";
+    uploadError.classList.remove("visible");
     uploadError.textContent = "";
   }, 2000);
 }
@@ -511,16 +501,16 @@ function showUploadError(msg) {
 // --- Upload Status & Error Handling Utilities ---
 function setUploadStatus({ text = "", show = false } = {}) {
   uploadStatus.textContent = text;
-  uploadStatus.style.display = show && text ? "block" : "none";
+  uploadStatus.classList.toggle("visible", show && !!text);
 }
 
 function setUploadError({ text = "", show = false, timeout = 2000 } = {}) {
   uploadError.textContent = text;
-  uploadError.style.display = show && text ? "block" : "none";
+  uploadError.classList.toggle("visible", show && !!text);
   if (show && text) {
     setUploadStatus({ text: "", show: false });
     setTimeout(() => {
-      uploadError.style.display = "none";
+      uploadError.classList.remove("visible");
       uploadError.textContent = "";
     }, timeout);
   }
@@ -528,7 +518,7 @@ function setUploadError({ text = "", show = false, timeout = 2000 } = {}) {
 
 function setGeneralError({ text = "", show = false, timeout = 3000 } = {}) {
   generalError.textContent = text;
-  generalError.style.display = show && text ? "block" : "none";
+  generalError.classList.toggle("visible", show && !!text);
 
   // If timeout is false, do not auto-hide the message; it will stay until this function is called again
   if (timeout === false) {
@@ -537,7 +527,7 @@ function setGeneralError({ text = "", show = false, timeout = 3000 } = {}) {
 
   if (show && text && timeout > 0) {
     setTimeout(() => {
-      generalError.style.display = "none";
+      generalError.classList.remove("visible");
       generalError.textContent = "";
     }, timeout);
   }

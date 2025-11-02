@@ -230,11 +230,15 @@ textarea {
 .barcodes {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
-  display: flex;
+  display: none; /* hidden until populated */
   justify-content: center;
   align-items: center;
   max-width: 100%;
   flex-wrap: wrap;
+}
+
+.barcodes.open {
+  display: flex;
 }
 
 .barcodes > div {
@@ -255,6 +259,49 @@ textarea {
   border: var(--border);
   border-radius: var(--border-radius);
   background: #fafbfc;
+}
+
+/* Drop area disabled state */
+.drop-disabled {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* Image upload info message (created dynamically) */
+.image-upload-info {
+  display: none;
+  color: #a94442;
+  font-size: 0.95rem;
+  margin: 0.5rem 0 0.5rem 0;
+  text-align: center;
+}
+.image-upload-info.visible {
+  display: block;
+}
+
+/* Incoming join request card */
+.incoming-request-item {
+  border: 1px solid #ddd;
+  padding: 0.4rem;
+  margin-top: 0.4rem;
+}
+.incoming-request-ua {
+  font-size: 0.9rem;
+  color: #666;
+}
+.incoming-request-buttons {
+  margin-top: 0.4rem;
+}
+.incoming-request-buttons button {
+  margin-right: 0.4rem;
+}
+
+/* Show/Hide close barcodes button */
+#close-barcodes {
+  display: none;
+}
+#close-barcodes.visible {
+  display: inline-block;
 }
 
 #dropArea {
@@ -283,6 +330,12 @@ textarea {
   margin: 0 auto 0.5rem auto;
   border-radius: 0.25rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* sizing for images added to sharedImages (used by shared-image-item wrapper) */
+.shared-image-item img {
+  max-width: 100%;
+  max-height: 300px;
 }
 
 .textarea-barcode-controls {
@@ -345,6 +398,9 @@ textarea {
   margin: 0.5rem 0;
   text-align: center;
 }
+.upload-status.visible {
+  display: block;
+}
 
 .upload-error {
   display: none;
@@ -354,6 +410,9 @@ textarea {
   color: var(--danger-text);
   border: 1px solid var(--danger-text);
   font-weight: bold;
+}
+.upload-error.visible {
+  display: block;
 }
 
 .general-error {
@@ -367,10 +426,16 @@ textarea {
   font-weight: bold;
   padding: 0.5rem 1rem;
 }
+.general-error.visible {
+  display: block;
+}
 
 .upload-progress-bar {
   display: none;
   width: 60%;
+}
+.upload-progress-bar.visible {
+  display: block;
 }
 
 #text-content {
