@@ -81,14 +81,18 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 // Helper to check origin. If allowedOrigins is set, only allow those. Otherwise allow same-origin (host match).
 function isOriginAllowed(req) {
   const origin = req.headers.origin;
-  if (!origin) {return true;} // non-browser or no origin header
+  if (!origin) {
+    return true;
+  } // non-browser or no origin header
   if (allowedOrigins && allowedOrigins.length > 0) {
     return allowedOrigins.includes(origin);
   }
 
   // Fallback: allow same-origin (protocol + host)
   const host = req.headers.host;
-  if (!host) {return false;}
+  if (!host) {
+    return false;
+  }
   const expected = `${req.socket.encrypted ? "https" : "http"}://${host}`;
   return origin === expected;
 }
