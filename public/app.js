@@ -74,9 +74,6 @@
     generalError: $("generalError"),
   };
 
-  // Defensive extra
-  const userCountStickyNum = $("userCountStickyNum");
-
   // --- Config & State ---
   const roomId = window.ROOM_ID;
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -183,9 +180,6 @@
               if (el.userCountSpan) {
                 el.userCountSpan.textContent = "0";
               }
-              if (userCountStickyNum) {
-                userCountStickyNum.textContent = "0";
-              }
             }
             setImageUploadEnabled(false);
             setUploadStatus({ text: "", show: false });
@@ -226,9 +220,6 @@
         userCount = 0;
         if (el.userCountSpan) {
           el.userCountSpan.textContent = "0";
-        }
-        if (userCountStickyNum) {
-          userCountStickyNum.textContent = "0";
         }
       }
 
@@ -461,9 +452,6 @@
     if (el.userCountSpan) {
       el.userCountSpan.textContent = users.length;
     }
-    if (userCountStickyNum) {
-      userCountStickyNum.textContent = `${users.length}`;
-    }
     setImageUploadEnabled(userCount > 1);
     updateH1UserCount(userCount);
   }
@@ -473,9 +461,6 @@
     userCount = (parseInt(el.userCountSpan?.textContent || "0", 10) || 0) + 1;
     if (el.userCountSpan) {
       el.userCountSpan.textContent = userCount;
-    }
-    if (userCountStickyNum) {
-      userCountStickyNum.textContent = `${userCount}`;
     }
     setImageUploadEnabled(userCount > 1);
     updateH1UserCount(userCount);
@@ -489,9 +474,6 @@
     );
     if (el.userCountSpan) {
       el.userCountSpan.textContent = userCount;
-    }
-    if (userCountStickyNum) {
-      userCountStickyNum.textContent = `${userCount}`;
     }
     setImageUploadEnabled(userCount > 1);
     updateH1UserCount(userCount);
