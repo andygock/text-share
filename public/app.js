@@ -812,22 +812,33 @@
     currentUploadFilename = file.name;
     setUploadStatus({ text: "Processing image...", show: true });
 
-    // Convert file to base64 safely using FileReader to avoid spreading large arrays
-    const base64 = await new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onload = () => {
-        try {
-          // fr.result is like: data:<mime-type>;base64,<data>
-          const result = fr.result || "";
-          const comma = result.indexOf(",");
-          resolve(comma >= 0 ? result.slice(comma + 1) : result);
-        } catch (err) {
-          reject(err);
+    // Convert file to base64 using file.arrayBuffer() (avoids FileReader)
+    const base64 = await (async () => {
+      // eslint-disable-next-line no-useless-catch
+      try {
+        // Read entire file into an ArrayBuffer
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+
+        // Choose a chunk size that's a multiple of 3 so base64 chunking aligns.
+        // 3072 bytes (3 * 1024) is small enough to avoid apply() limits in most browsers.
+        const CHUNK_SIZE = 3 * 1024;
+        let b64 = "";
+
+        for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+          const slice = bytes.subarray(i, i + CHUNK_SIZE);
+
+          // Convert slice to a binary string, then to base64.
+          // String.fromCharCode.apply(null, slice) works for small slices.
+          b64 += btoa(String.fromCharCode.apply(null, slice));
         }
-      };
-      fr.onerror = (err) => reject(err);
-      fr.readAsDataURL(file);
-    });
+
+        return b64;
+      } catch (err) {
+        // propagate error to caller similar to original promise rejection, or do something else later
+        throw err;
+      }
+    })();
 
     safeSend({
       type: "imageUploadStart",
