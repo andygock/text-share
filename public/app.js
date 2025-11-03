@@ -461,10 +461,15 @@
   ws.onclose = () => console.log("WebSocket connection closed");
   ws.onerror = (err) => {
     console.error("WebSocket error:", err);
-    if (el.userListUl) el.userListUl.innerHTML = "";
-    userCount = 0;
-    if (el.userCountSpan) el.userCountSpan.textContent = "0";
-    if (userCountStickyNum) userCountStickyNum.textContent = "0";
+    // clear user list and UI counters so the page reflects disconnected state
+    try {
+      updateUserList([]);
+    } catch (e) {
+      if (el.userListUl) el.userListUl.innerHTML = "";
+      userCount = 0;
+      if (el.userCountSpan) el.userCountSpan.textContent = "0";
+      if (userCountStickyNum) userCountStickyNum.textContent = "0";
+    }
     setImageUploadEnabled(false);
     setUploadStatus({ text: "", show: false });
     setGeneralError({

@@ -39,6 +39,11 @@ function canJoinRoom(roomId, clientIp) {
 
 function joinRoom(roomId, ws, clientIp) {
   const roomClients = getOrCreateRoom(roomId);
+  // ensure ws carries its ip so other code can read it; some older codepaths
+  // may rely on ws.ip being set on the object
+  try {
+    if (!ws.ip) ws.ip = clientIp;
+  } catch (e) {}
   roomClients.add(ws);
   clientIpCount.set(clientIp, clientIpCount.get(clientIp) + 1);
 }

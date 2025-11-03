@@ -205,7 +205,9 @@ wss.on("connection", (ws, req) => {
   );
 
   // Send current user list to the newly connected client
-  const userList = Array.from(roomClients).map((client) => client.ip);
+  const userList = Array.from(roomClients).map(
+    (client) => client.ip || client._socket?.remoteAddress || "unknown"
+  );
   ws.send(JSON.stringify({ type: "userList", users: userList }));
 
   // Notify other clients of new connection
@@ -214,8 +216,6 @@ wss.on("connection", (ws, req) => {
       client.send(JSON.stringify({ type: "userConnected", ip: clientIp }));
     }
   });
-
-  ws.ip = clientIp;
 
   // WS-level invite messages
   // Supported messages: generateInvite, respondInvite
