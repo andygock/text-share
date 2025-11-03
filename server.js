@@ -29,77 +29,26 @@ app.use(express.json());
 
 const crypto = require("crypto");
 const { globalJoinLimiter, ipJoinLimiter } = require("./rate-limiter");
+const invites = require("./invites");
+const { handleImageUploadChunk } = require("./upload-handler");
 
 // In-memory invite / request stores
 const sockets = new Map(); // socketId -> ws
-const pendingInvites = new Map(); // token -> invite
-const pinToToken = new Map(); // pin -> token
-const pendingRequests = new Map(); // requestId -> { res, timeout }
+// invites.pendingInvites, invites.pinToToken and invites.pendingRequests are used instead of local maps
 
 // Configurable invite settings
 const INVITE_TTL_MS = parseInt(process.env.INVITE_TTL_MS, 10) || 30000; // 30s
 const INVITE_MAX_ATTEMPTS = parseInt(process.env.INVITE_MAX_ATTEMPTS, 10) || 5;
 
-function generateUnique6DigitPin() {
-  // Try a few times to avoid collision with active pins
-  for (let i = 0; i < 10; i++) {
-    const pin = Math.floor(Math.random() * 1000000)
-      .toString()
-      .padStart(6, "0");
-    if (!pinToToken.has(pin)) return pin;
-  }
-  // Fallback: brute force until unique
-  let pin;
-  do {
-    pin = Math.floor(Math.random() * 1000000)
-      .toString()
-      .padStart(6, "0");
-  } while (pinToToken.has(pin));
-  return pin;
-}
+// use invites.generateUnique6DigitPin when needed
 
-function expireInvite(token) {
-  // centralized deletion to ensure timeouts and pending requests are cleaned up
-  deleteInvite(token, "expired");
-}
-
-function deleteInvite(token, reason = "removed") {
-  const invite = pendingInvites.get(token);
-  if (!invite) return;
-  // clear scheduled expiry if present
-  if (invite.timeoutId) {
-    try {
-      clearTimeout(invite.timeoutId);
-    } catch (e) {}
-  }
-  pendingInvites.delete(token);
-  pinToToken.delete(invite.pin);
-  // notify owner if connected
-  const ownerWs = sockets.get(invite.ownerSocketId);
-  if (ownerWs && ownerWs.readyState === WebSocket.OPEN) {
-    try {
-      ownerWs.send(
-        JSON.stringify({ type: "inviteRemoved", pin: invite.pin, reason })
-      );
-    } catch (e) {}
-  }
-  // fail any pending requests for this invite
-  for (const [requestId, pending] of pendingRequests.entries()) {
-    if (pending.inviteToken === token) {
-      try {
-        pending.res.json({ ok: false, error: `Invite ${reason}` });
-      } catch (e) {}
-      clearTimeout(pending.timeout);
-      pendingRequests.delete(requestId);
-    }
-  }
-}
+// use invites.deleteInvite / invites.expireInvite
 
 // Periodically cleanup expired invites
 setInterval(() => {
   const now = Date.now();
-  for (const [token, invite] of pendingInvites.entries()) {
-    if (invite.expiresAt <= now) expireInvite(token);
+  for (const [token, invite] of invites.pendingInvites.entries()) {
+    if (invite.expiresAt <= now) invites.expireInvite(token, sockets);
   }
 }, 30 * 1000);
 // Max image upload size (default 10MB, can override with env var)
@@ -158,13 +107,13 @@ app.post("/request-join", async (req, res) => {
     return res.status(400).json({ ok: false, error: "Missing pin" });
   }
   // Find invite by pin
-  const token = pinToToken.get(pin);
+  const token = invites.pinToToken.get(pin);
   if (!token)
     return res.status(404).json({ ok: false, error: "No active invite" });
-  const invite = pendingInvites.get(token);
+  const invite = invites.pendingInvites.get(token);
   if (!invite || invite.expiresAt <= Date.now() || invite.used) {
-    pinToToken.delete(pin);
-    pendingInvites.delete(token);
+    invites.pinToToken.delete(pin);
+    invites.pendingInvites.delete(token);
     return res.status(404).json({ ok: false, error: "No active invite" });
   }
   // attempt counting
@@ -186,15 +135,19 @@ app.post("/request-join", async (req, res) => {
   // Create a pending request and notify owner; keep the response open until owner accepts/denies or timeout
   const requestId = uuidv4();
   const timeout = setTimeout(() => {
-    const pending = pendingRequests.get(requestId);
+    const pending = invites.pendingRequests.get(requestId);
     if (!pending) return;
     try {
       pending.res.json({ ok: false, error: "Timed out waiting for owner" });
     } catch (e) {}
-    pendingRequests.delete(requestId);
+    invites.pendingRequests.delete(requestId);
   }, Math.min(invite.expiresAt - Date.now(), 120000));
-
-  pendingRequests.set(requestId, { res, timeout, inviteToken: token });
+  invites.pendingRequests.set(requestId, { res, timeout, inviteToken: token });
+  console.info(
+    `invite: join-request id=${requestId} token=${token} from=${clientIp} ua=${(
+      req.headers["user-agent"] || ""
+    ).slice(0, 200)}`
+  );
   // Notify owner of the join request
   try {
     ownerWs.send(
@@ -205,9 +158,12 @@ app.post("/request-join", async (req, res) => {
         ua: req.headers["user-agent"] || "",
       })
     );
+    console.info(
+      `invite: notified owner ${invite.ownerSocketId} of request ${requestId}`
+    );
   } catch (err) {
     clearTimeout(timeout);
-    pendingRequests.delete(requestId);
+    invites.pendingRequests.delete(requestId);
     return res.status(500).json({ ok: false, error: "Failed to notify owner" });
   }
   // do not end response here - it will be fulfilled when owner calls respondInvite via WS
@@ -244,8 +200,9 @@ wss.on("connection", (ws, req) => {
   joinRoom(roomId, ws, clientIp);
   const roomClients = getOrCreateRoom(roomId);
 
-  console.log(`Client connected to room ${roomId} from IP: ${clientIp}`);
-  console.log(`Current clients in room ${roomId}: ${roomClients.size}`);
+  console.log(
+    `Client connected: id=${ws.id} room=${roomId} ip=${clientIp} clients=${roomClients.size}`
+  );
 
   // Send current user list to the newly connected client
   const userList = Array.from(roomClients).map((client) => client.ip);
@@ -303,7 +260,7 @@ wss.on("connection", (ws, req) => {
         // Only allow if this ws is in a room (roomId) and is actually part of that room
         // Create invite object
         try {
-          const pin = generateUnique6DigitPin();
+          const pin = invites.generateUnique6DigitPin();
           const token = crypto.randomBytes(16).toString("hex");
           const invite = {
             token,
@@ -320,20 +277,23 @@ wss.on("connection", (ws, req) => {
           for (const [
             existingToken,
             existingInvite,
-          ] of pendingInvites.entries()) {
+          ] of invites.pendingInvites.entries()) {
             if (existingInvite.ownerSocketId === ws.id) {
-              deleteInvite(existingToken, "replaced");
+              invites.deleteInvite(existingToken, "replaced", sockets);
             }
           }
 
           // store invite and schedule expiry (keep timeout id so we can clear on replace)
           const timeoutId = setTimeout(
-            () => expireInvite(token),
+            () => invites.expireInvite(token, sockets),
             INVITE_TTL_MS + 1000
           );
           invite.timeoutId = timeoutId;
-          pendingInvites.set(token, invite);
-          pinToToken.set(pin, token);
+          invites.pendingInvites.set(token, invite);
+          invites.pinToToken.set(pin, token);
+          console.info(
+            `invite: generated token=${token} pin=${pin} owner=${ws.id} room=${roomId} expiresAt=${invite.expiresAt}`
+          );
           // Respond to owner with pin
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(
@@ -361,7 +321,7 @@ wss.on("connection", (ws, req) => {
       // Owner responds to a pending join request
       if (parsed.type === "respondInvite") {
         const { requestId, accept } = parsed;
-        const pending = pendingRequests.get(requestId);
+        const pending = invites.pendingRequests.get(requestId);
         if (!pending) {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(
@@ -374,12 +334,12 @@ wss.on("connection", (ws, req) => {
           return;
         }
         const { inviteToken } = pending;
-        const invite = pendingInvites.get(inviteToken);
+        const invite = invites.pendingInvites.get(inviteToken);
         if (!invite) {
           // invite expired
           pending.res.json({ ok: false, error: "Invite expired" });
           clearTimeout(pending.timeout);
-          pendingRequests.delete(requestId);
+          invites.pendingRequests.delete(requestId);
           return;
         }
         // Only the owner can respond
@@ -398,11 +358,17 @@ wss.on("connection", (ws, req) => {
           invite.used = true;
           // respond to pending HTTP request with room URL so the requester can redirect
           pending.res.json({ ok: true, roomUrl: `/${invite.roomId}` });
+          console.info(
+            `invite: accepted requestId=${requestId} token=${inviteToken} owner=${ws.id}`
+          );
         } else {
           pending.res.json({ ok: false, error: "Denied by owner" });
+          console.info(
+            `invite: denied requestId=${requestId} token=${inviteToken} owner=${ws.id}`
+          );
         }
         clearTimeout(pending.timeout);
-        pendingRequests.delete(requestId);
+        invites.pendingRequests.delete(requestId);
         return;
       }
       // Handle image protocol
@@ -469,176 +435,29 @@ wss.on("connection", (ws, req) => {
           }
         });
       } else if (parsed.type === "imageUploadChunk") {
-        if (!ws.imageUploadState) return;
-        // Basic filename match
-        if (parsed.filename !== ws.imageUploadState.filename) {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Mismatched filename for upload",
-            })
+        // delegate to upload handler
+        try {
+          await handleImageUploadChunk(
+            parsed,
+            ws,
+            roomClients,
+            processImageBuffer,
+            MAX_IMAGE_UPLOAD_SIZE,
+            MAX_CHUNKS,
+            MAX_CHUNK_BYTES
           );
-          return;
-        }
-        // Validate indexes and sizes to avoid DoS/memory exhaustion
-        const chunkIndex = Number(parsed.chunkIndex);
-        const totalChunks = Number(parsed.totalChunks);
-        if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Invalid chunkIndex",
-            })
-          );
-          return;
-        }
-        if (
-          !Number.isInteger(totalChunks) ||
-          totalChunks <= 0 ||
-          totalChunks > MAX_CHUNKS
-        ) {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Invalid totalChunks",
-            })
-          );
-          return;
-        }
-        if (!parsed.data || typeof parsed.data !== "string") {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Missing chunk data",
-            })
-          );
-          return;
-        }
-        // Approximate chunk bytes when base64-decoded
-        const approxBytes = Buffer.byteLength(parsed.data, "base64");
-        if (approxBytes > MAX_CHUNK_BYTES) {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Chunk too large",
-            })
-          );
-          return;
-        }
-        // Rough estimate of total upload size
-        const estimatedTotal = approxBytes * totalChunks;
-        if (estimatedTotal > MAX_IMAGE_UPLOAD_SIZE * 1.2) {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Upload exceeds allowed size",
-            })
-          );
-          ws.imageUploadState = null;
-          return;
-        }
-
-        // Prevent creating extremely sparse arrays
-        if (totalChunks > MAX_CHUNKS) {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Too many chunks",
-            })
-          );
-          ws.imageUploadState = null;
-          return;
-        }
-
-        // Store chunk (do not double-count if re-sent)
-        if (!ws.imageUploadState.chunks[chunkIndex]) {
-          ws.imageUploadState.chunks[chunkIndex] = parsed.data;
-          ws.imageUploadState.received =
-            (ws.imageUploadState.received || 0) + 1;
-        } else {
-          // overwrite duplicate
-          ws.imageUploadState.chunks[chunkIndex] = parsed.data;
-        }
-        ws.imageUploadState.totalChunks = totalChunks;
-
-        // Broadcast chunk to all clients (including uploader)
-        roomClients.forEach((client) => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-          }
-        });
-
-        // Progress
-        const progress = Math.round(
-          (ws.imageUploadState.received / ws.imageUploadState.totalChunks) * 100
-        );
-        roomClients.forEach((client) => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(
-              JSON.stringify({
-                type: "imageUploadProgress",
-                filename: ws.imageUploadState.filename,
-                progress,
-              })
-            );
-          }
-        });
-
-        // If last chunk, process image
-        if (ws.imageUploadState.received === ws.imageUploadState.totalChunks) {
+        } catch (err) {
+          console.error("upload chunk handler error", err);
           try {
-            // Reassemble base64 chunks
-            const base64 = ws.imageUploadState.chunks.join("");
-            const buffer = Buffer.from(base64, "base64");
-            const ext = require("path")
-              .extname(ws.imageUploadState.filename)
-              .toLowerCase();
-            const result = await processImageBuffer(buffer, ext);
-            if (result.size > 500 * 1024) {
-              ws.send(
-                JSON.stringify({
-                  type: "imageUploadError",
-                  filename: ws.imageUploadState.filename,
-                  error: "Image could not be compressed below 500kB.",
-                })
-              );
-              ws.imageUploadState = null;
-              return;
-            }
-            // Send complete to all
-            roomClients.forEach((client) => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(
-                  JSON.stringify({
-                    type: "imageUploadComplete",
-                    filename: ws.imageUploadState.filename,
-                    mimeType: ws.imageUploadState.mimeType,
-                    width: result.width,
-                    height: result.height,
-                    size: result.size,
-                    data: result.buffer.toString("base64"),
-                  })
-                );
-              }
-            });
-            ws.imageUploadState = null;
-          } catch (err) {
             ws.send(
               JSON.stringify({
                 type: "imageUploadError",
-                filename: ws.imageUploadState.filename,
-                error: "Image processing failed.",
+                filename: parsed.filename,
+                error: "Server error processing chunk",
               })
             );
-            ws.imageUploadState = null;
-          }
+          } catch (e) {}
+          ws.imageUploadState = null;
         }
       }
       return;
@@ -648,13 +467,15 @@ wss.on("connection", (ws, req) => {
   ws.on("close", () => {
     sockets.delete(ws.id);
     // Remove any invites owned by this socket and fail pending requests
-    for (const [token, invite] of pendingInvites.entries()) {
+    for (const [token, invite] of invites.pendingInvites.entries()) {
       if (invite.ownerSocketId === ws.id) {
-        deleteInvite(token, "owner_disconnected");
+        invites.deleteInvite(token, "owner_disconnected", sockets);
       }
     }
     const roomIsEmpty = leaveRoom(roomId, ws, clientIp);
-    console.log(`Client disconnected from room ${roomId} from IP: ${clientIp}`);
+    console.log(
+      `Client disconnected: id=${ws.id} room=${roomId} ip=${clientIp}`
+    );
     console.log(
       `Remaining clients in room ${roomId}: ${getOrCreateRoom(roomId).size}`
     );
