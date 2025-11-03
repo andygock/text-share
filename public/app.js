@@ -42,7 +42,129 @@
   // --- Config & State ---
   const roomId = window.ROOM_ID;
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${protocol}://${window.location.host}/${roomId}`);
+  // WebSocket instance (will be created/recreated by createAndBindWebSocket)
+  let ws = null;
+  // Reconnect controls
+  let reconnectIntervalId = null;
+  let reconnectStartTime = 0;
+  const RECONNECT_INTERVAL = 5000; // try every 5s
+  const RECONNECT_TIMEOUT = 30000; // stop trying after 30s
+
+  function createAndBindWebSocket() {
+    const socket = new WebSocket(
+      `${protocol}://${window.location.host}/${roomId}`
+    );
+    ws = socket;
+
+    socket.onmessage = (ev) => {
+      let m;
+      try {
+        m = JSON.parse(ev.data);
+      } catch (e) {
+        return;
+      }
+      const h = handlers[m.type];
+      if (h)
+        try {
+          h(m);
+        } catch (e) {
+          console.error("handler error", e);
+        }
+    };
+
+    socket.onopen = () => {
+      console.log("WebSocket connection opened");
+
+      // clear any reconnect attempts and errors
+      if (reconnectIntervalId) {
+        clearInterval(reconnectIntervalId);
+        reconnectIntervalId = null;
+        reconnectStartTime = 0;
+      }
+      setGeneralError({ text: "", show: false });
+    };
+
+    socket.onclose = () => {
+      console.log("WebSocket connection closed");
+
+      // Start reconnect attempts if not already started
+      if (!reconnectIntervalId) {
+        reconnectStartTime = Date.now();
+        setGeneralError({
+          text: "Connection lost. Attempting to reconnect...",
+          show: true,
+          timeout: false,
+        });
+        reconnectIntervalId = setInterval(() => {
+          // stop trying after timeout
+          if (Date.now() - reconnectStartTime >= RECONNECT_TIMEOUT) {
+            clearInterval(reconnectIntervalId);
+            reconnectIntervalId = null;
+            setGeneralError({
+              text: "Connection error. Please refresh the page.",
+              show: true,
+              timeout: false,
+            });
+            // ensure UI reflects disconnected state
+            try {
+              updateUserList([]);
+            } catch (e) {
+              if (el.userListUl) el.userListUl.innerHTML = "";
+              userCount = 0;
+              if (el.userCountSpan) el.userCountSpan.textContent = "0";
+              if (userCountStickyNum) userCountStickyNum.textContent = "0";
+            }
+            setImageUploadEnabled(false);
+            setUploadStatus({ text: "", show: false });
+            return;
+          }
+          try {
+            console.log("Attempting WebSocket reconnect...");
+
+            // create a fresh socket and bind handlers — onopen will clear the interval on success
+            createAndBindWebSocket();
+          } catch (e) {
+            // ignore and let interval continue
+          }
+        }, RECONNECT_INTERVAL);
+      }
+    };
+
+    socket.onerror = (err) => {
+      console.error("WebSocket error:", err);
+
+      // clear user list and UI counters so the page reflects disconnected state
+      try {
+        updateUserList([]);
+      } catch (e) {
+        if (el.userListUl) el.userListUl.innerHTML = "";
+        userCount = 0;
+        if (el.userCountSpan) el.userCountSpan.textContent = "0";
+        if (userCountStickyNum) userCountStickyNum.textContent = "0";
+      }
+      setImageUploadEnabled(false);
+      setUploadStatus({ text: "", show: false });
+      // If we're currently reconnecting, show a reconnecting message; otherwise show final error.
+      if (reconnectIntervalId) {
+        setGeneralError({
+          text: "Connection lost. Attempting to reconnect...",
+          show: true,
+          timeout: false,
+        });
+      } else {
+        setGeneralError({
+          text: "Connection error. Please refresh the page.",
+          show: true,
+          timeout: false,
+        });
+      }
+    };
+
+    return socket;
+  }
+
+  // Create initial connection
+  createAndBindWebSocket();
   const MAX_IMAGE_UPLOAD_SIZE =
     window.MAX_IMAGE_UPLOAD_SIZE || 10 * 1024 * 1024;
   let inputHash = "";
@@ -441,49 +563,12 @@
       showUploadError(m.error || "Text update rate limit exceeded."),
   };
 
-  ws.onmessage = (ev) => {
-    let m;
-    try {
-      m = JSON.parse(ev.data);
-    } catch (e) {
-      return;
-    }
-    const h = handlers[m.type];
-    if (h)
-      try {
-        h(m);
-      } catch (e) {
-        console.error("handler error", e);
-      }
-  };
-
-  ws.onopen = () => console.log("WebSocket connection opened");
-  ws.onclose = () => console.log("WebSocket connection closed");
-  ws.onerror = (err) => {
-    console.error("WebSocket error:", err);
-    // clear user list and UI counters so the page reflects disconnected state
-    try {
-      updateUserList([]);
-    } catch (e) {
-      if (el.userListUl) el.userListUl.innerHTML = "";
-      userCount = 0;
-      if (el.userCountSpan) el.userCountSpan.textContent = "0";
-      if (userCountStickyNum) userCountStickyNum.textContent = "0";
-    }
-    setImageUploadEnabled(false);
-    setUploadStatus({ text: "", show: false });
-    setGeneralError({
-      text: "Connection error. Please refresh the page.",
-      show: true,
-      timeout: false,
-    });
-  };
-
   // --- Upload logic ---
   async function uploadImage(file) {
     isUploading = true;
     currentUploadFilename = file.name;
     setUploadStatus({ text: "Processing image...", show: true });
+
     // Convert file to base64 safely using FileReader to avoid spreading large arrays
     const base64 = await new Promise((resolve, reject) => {
       const fr = new FileReader();
