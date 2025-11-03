@@ -10,14 +10,30 @@
 
     // Assign a safe whitelist of properties to avoid accidental innerHTML/event injection
     if (props) {
-      if (props.id) {el.id = props.id;}
-      if (props.className) {el.className = props.className;}
-      if (props.src) {el.src = props.src;}
-      if (props.alt) {el.alt = props.alt;}
-      if (props.title) {el.title = props.title;}
-      if (props.type) {el.type = props.type;}
-      if (props.value) {el.value = props.value;}
-      if (props.id) {el.id = props.id;}
+      if (props.id) {
+        el.id = props.id;
+      }
+      if (props.className) {
+        el.className = props.className;
+      }
+      if (props.src) {
+        el.src = props.src;
+      }
+      if (props.alt) {
+        el.alt = props.alt;
+      }
+      if (props.title) {
+        el.title = props.title;
+      }
+      if (props.type) {
+        el.type = props.type;
+      }
+      if (props.value) {
+        el.value = props.value;
+      }
+      if (props.id) {
+        el.id = props.id;
+      }
       if (props.dataset && typeof props.dataset === "object") {
         Object.keys(props.dataset).forEach(
           (k) => (el.dataset[k] = props.dataset[k])
@@ -178,8 +194,18 @@
           try {
             console.log("Attempting WebSocket reconnect...");
 
-            // create a fresh socket and bind handlers — onopen will clear the interval on success
-            createAndBindWebSocket();
+            // Only create a new socket if there isn't one already OPEN or CONNECTING.
+            // This prevents multiple simultaneous reconnect attempts which can
+            // result in multiple active connections when the server comes back up.
+            if (!ws || ws.readyState === WebSocket.CLOSED) {
+              // create a fresh socket and bind handlers — onopen will clear the interval on success
+              createAndBindWebSocket();
+            } else {
+              console.log(
+                "Skipping reconnect: websocket already open/connecting",
+                ws.readyState
+              );
+            }
           } catch (e) {
             // ignore and let interval continue
           }
@@ -637,9 +663,11 @@
           el.sharedImages.children.length > MAX_IMAGES_SHOWN
         ) {
           const first = el.sharedImages.children[0];
-          if (first && first.remove) {first.remove();}
-          else if (first && first.parentNode)
-            {first.parentNode.removeChild(first);}
+          if (first && first.remove) {
+            first.remove();
+          } else if (first && first.parentNode) {
+            first.parentNode.removeChild(first);
+          }
         }
       } catch (err) {
         console.error("Error trimming shared images", err);
