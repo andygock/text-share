@@ -7,7 +7,23 @@
 
   const create = (tag, props = {}, ...children) => {
     const el = document.createElement(tag);
-    Object.assign(el, props);
+
+    // Assign a safe whitelist of properties to avoid accidental innerHTML/event injection
+    if (props) {
+      if (props.id) {el.id = props.id;}
+      if (props.className) {el.className = props.className;}
+      if (props.src) {el.src = props.src;}
+      if (props.alt) {el.alt = props.alt;}
+      if (props.title) {el.title = props.title;}
+      if (props.type) {el.type = props.type;}
+      if (props.value) {el.value = props.value;}
+      if (props.id) {el.id = props.id;}
+      if (props.dataset && typeof props.dataset === "object") {
+        Object.keys(props.dataset).forEach(
+          (k) => (el.dataset[k] = props.dataset[k])
+        );
+      }
+    }
     children.forEach((c) =>
       el.appendChild(typeof c === "string" ? document.createTextNode(c) : c)
     );
@@ -51,6 +67,27 @@
 
   // WebSocket instance (will be created/recreated by createAndBindWebSocket)
   let ws = null;
+
+  // Helper to safely send JSON over WebSocket with checks and user-visible errors
+  function safeSend(obj) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.error("WebSocket not open; cannot send", obj);
+      setGeneralError({
+        text: "Not connected. Please wait for reconnection.",
+        show: true,
+        timeout: 3000,
+      });
+      return false;
+    }
+    try {
+      ws.send(JSON.stringify(obj));
+      return true;
+    } catch (err) {
+      console.error("WebSocket send failed", err, obj);
+      setGeneralError({ text: "Send failed.", show: true, timeout: 3000 });
+      return false;
+    }
+  }
 
   // Reconnect controls
   let reconnectIntervalId = null;
@@ -196,6 +233,9 @@
 
   const MAX_IMAGE_UPLOAD_SIZE =
     window.MAX_IMAGE_UPLOAD_SIZE || 10 * 1024 * 1024;
+
+  // Limit number of images kept in DOM to avoid unbounded memory growth
+  const MAX_IMAGES_SHOWN = 20;
 
   let inputHash = "";
   let currentPin = null;
@@ -366,9 +406,21 @@
       return;
     }
 
-    const li = el.userListUl.querySelector(`li[data-ip="${ip}"]`);
-    if (li) {
-      el.userListUl.removeChild(li);
+    // Avoid using querySelector with unescaped strings. Iterate and compare dataset values.
+    const items = Array.from(el.userListUl.children || []);
+    for (const li of items) {
+      try {
+        if (li && li.dataset && li.dataset.ip === ip) {
+          if (li.remove) {
+            li.remove();
+          } else {
+            el.userListUl.removeChild(li);
+          }
+          return;
+        }
+      } catch (err) {
+        console.error("Error while removing user from list", err);
+      }
     }
   }
 
@@ -483,11 +535,7 @@
 
   if (el.sharedTextarea) {
     el.sharedTextarea.addEventListener("input", () => {
-      try {
-        ws.send(
-          JSON.stringify({ type: "textUpdate", text: el.sharedTextarea.value })
-        );
-      } catch (e) {}
+      safeSend({ type: "textUpdate", text: el.sharedTextarea.value });
       crc32(el.sharedTextarea.value);
       if (el.generateBarcodesButton) {
         el.generateBarcodesButton.disabled = false;
@@ -545,9 +593,23 @@
       if (m.filename !== incomingFilename) {
         return;
       }
-      const base64 = m.data || "";
+
+      // If the server sent the full base64 in m.data use that; otherwise try to reassemble from incomingChunks
+      let base64 = m.data || "";
+      if (!base64 && incomingChunks && incomingChunks.length) {
+        base64 = incomingChunks.join("");
+      }
+      if (!base64) {
+        showUploadError("Incomplete image data received.");
+        incomingFilename = "";
+        incomingChunks = [];
+        incomingTotalChunks = 0;
+        incomingMimeType = "";
+        return;
+      }
+      const src = `data:${m.mimeType};base64,${base64}`;
       const img = create("img", {
-        src: `data:${m.mimeType};base64,${base64}`,
+        src,
         alt: m.filename,
         title: `${m.filename} (${m.width}x${m.height}, ${Math.ceil(
           m.size / 1024
@@ -566,6 +628,23 @@
       wrap.appendChild(img);
       wrap.appendChild(info);
       el.sharedImages?.appendChild(wrap);
+
+      // Trim older images to avoid unbounded DOM growth
+      try {
+        while (
+          el.sharedImages &&
+          el.sharedImages.children &&
+          el.sharedImages.children.length > MAX_IMAGES_SHOWN
+        ) {
+          const first = el.sharedImages.children[0];
+          if (first && first.remove) {first.remove();}
+          else if (first && first.parentNode)
+            {first.parentNode.removeChild(first);}
+        }
+      } catch (err) {
+        console.error("Error trimming shared images", err);
+      }
+
       setUploadStatus({ text: "Image received.", show: true });
       setTimeout(() => setUploadStatus({ text: "", show: false }), 2000);
       incomingFilename = "";
@@ -656,29 +735,37 @@
         document.createTextNode("Accept")
       );
       btnAccept.addEventListener("click", () => {
-        try {
-          ws.send(
-            JSON.stringify({
-              type: "respondInvite",
-              requestId: m.requestId,
-              accept: true,
-            })
-          );
-        } catch (e) {}
-        el.incomingRequestsDiv.removeChild(reqDiv);
+        safeSend({
+          type: "respondInvite",
+          requestId: m.requestId,
+          accept: true,
+        });
+        if (reqDiv && typeof reqDiv.remove === "function") {
+          reqDiv.remove();
+        } else if (reqDiv && el.incomingRequestsDiv) {
+          try {
+            el.incomingRequestsDiv.removeChild(reqDiv);
+          } catch (err) {
+            console.error("failed to remove request div", err);
+          }
+        }
       });
       const btnDeny = create("button", {}, document.createTextNode("Deny"));
       btnDeny.addEventListener("click", () => {
-        try {
-          ws.send(
-            JSON.stringify({
-              type: "respondInvite",
-              requestId: m.requestId,
-              accept: false,
-            })
-          );
-        } catch (e) {}
-        el.incomingRequestsDiv.removeChild(reqDiv);
+        safeSend({
+          type: "respondInvite",
+          requestId: m.requestId,
+          accept: false,
+        });
+        if (reqDiv && typeof reqDiv.remove === "function") {
+          reqDiv.remove();
+        } else if (reqDiv && el.incomingRequestsDiv) {
+          try {
+            el.incomingRequestsDiv.removeChild(reqDiv);
+          } catch (err) {
+            console.error("failed to remove request div", err);
+          }
+        }
       });
       const btnWrap = create("div", { className: "incoming-request-buttons" });
       btnWrap.appendChild(btnAccept);
@@ -714,30 +801,22 @@
       fr.readAsDataURL(file);
     });
 
-    try {
-      ws.send(
-        JSON.stringify({
-          type: "imageUploadStart",
-          filename: file.name,
-          mimeType: file.type,
-          size: file.size,
-        })
-      );
-    } catch (e) {}
+    safeSend({
+      type: "imageUploadStart",
+      filename: file.name,
+      mimeType: file.type,
+      size: file.size,
+    });
     const chunkSize = 32 * 1024;
     const chunks = splitBase64IntoChunks(base64, chunkSize);
     for (let i = 0; i < chunks.length; i++) {
-      try {
-        ws.send(
-          JSON.stringify({
-            type: "imageUploadChunk",
-            filename: file.name,
-            chunkIndex: i,
-            totalChunks: chunks.length,
-            data: chunks[i],
-          })
-        );
-      } catch (e) {}
+      safeSend({
+        type: "imageUploadChunk",
+        filename: file.name,
+        chunkIndex: i,
+        totalChunks: chunks.length,
+        data: chunks[i],
+      });
       if (el.uploadError && el.uploadError.classList.contains("visible")) {
         // leave loop but continue sending? original continued, preserve same behavior by continuing
       }
@@ -822,9 +901,7 @@
   if (el.generatePinBtn) {
     el.generatePinBtn.addEventListener("click", (e) => {
       e.preventDefault();
-      try {
-        ws.send(JSON.stringify({ type: "generateInvite" }));
-      } catch (err) {}
+      safeSend({ type: "generateInvite" });
     });
   }
 

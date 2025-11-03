@@ -65,10 +65,57 @@ const MAX_CHUNK_BYTES = parseInt(process.env.MAX_CHUNK_BYTES || "131072", 10); /
 
 const server = http.createServer(app);
 
+// Create a WebSocket server without attaching to the HTTP server so we can
+// verify the Origin header on upgrade requests.
 const wss = new WebSocket.Server({
-  server,
+  noServer: true,
   maxPayload: MAX_IMAGE_UPLOAD_SIZE + 1024 * 1024, // allow small margin
   perMessageDeflate: false,
+});
+
+// Allowed origins can be configured via ALLOWED_ORIGINS env var as a comma-separated list.
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim())
+  : null;
+
+// Helper to check origin. If allowedOrigins is set, only allow those. Otherwise allow same-origin (host match).
+function isOriginAllowed(req) {
+  const origin = req.headers.origin;
+  if (!origin) {return true;} // non-browser or no origin header
+  if (allowedOrigins && allowedOrigins.length > 0) {
+    return allowedOrigins.includes(origin);
+  }
+
+  // Fallback: allow same-origin (protocol + host)
+  const host = req.headers.host;
+  if (!host) {return false;}
+  const expected = `${req.socket.encrypted ? "https" : "http"}://${host}`;
+  return origin === expected;
+}
+
+// Handle HTTP Upgrade to WebSocket and perform Origin checks
+server.on("upgrade", (req, socket, head) => {
+  try {
+    if (!isOriginAllowed(req)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      console.warn(
+        "WebSocket upgrade rejected due to Origin:",
+        req.headers.origin
+      );
+      return;
+    }
+
+    // We can allow the upgrade; delegate to the WebSocket server
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  } catch (err) {
+    console.error("Error during upgrade handling:", err);
+    try {
+      socket.destroy();
+    } catch (e) {}
+  }
 });
 
 app.get("/", (req, res) => {
@@ -467,6 +514,50 @@ wss.on("connection", (ws, req) => {
           }
         });
       } else if (parsed.type === "imageUploadChunk") {
+        // Basic validation to avoid DoS via malformed chunk messages before delegating to handler
+        const chunkIndex = Number(parsed.chunkIndex);
+        const totalChunks = Number(parsed.totalChunks);
+        const data = parsed.data || "";
+
+        if (!Number.isFinite(chunkIndex) || chunkIndex < 0) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Invalid chunk index",
+            })
+          );
+          return;
+        }
+        if (
+          !Number.isFinite(totalChunks) ||
+          totalChunks <= 0 ||
+          totalChunks > MAX_CHUNKS
+        ) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Invalid totalChunks",
+            })
+          );
+          return;
+        }
+
+        // Estimate decoded byte length from base64 string length: bytes ~= (len * 3) / 4
+        const base64Len = typeof data === "string" ? data.length : 0;
+        const estimatedBytes = Math.floor((base64Len * 3) / 4);
+        if (estimatedBytes > MAX_CHUNK_BYTES) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Chunk too large",
+            })
+          );
+          return;
+        }
+
         // delegate to upload handler
         try {
           await handleImageUploadChunk(
