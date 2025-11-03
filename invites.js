@@ -10,7 +10,9 @@ function generateUnique6DigitPin() {
     const pin = Math.floor(Math.random() * 1000000)
       .toString()
       .padStart(6, "0");
-    if (!pinToToken.has(pin)) return pin;
+    if (!pinToToken.has(pin)) {
+      return pin;
+    }
   }
   let pin;
   do {
@@ -23,7 +25,9 @@ function generateUnique6DigitPin() {
 
 function deleteInvite(token, reason = "removed", sockets) {
   const invite = pendingInvites.get(token);
-  if (!invite) return;
+  if (!invite) {
+    return;
+  }
   if (invite.timeoutId) {
     try {
       clearTimeout(invite.timeoutId);
@@ -34,6 +38,7 @@ function deleteInvite(token, reason = "removed", sockets) {
   console.info(
     `invite: deleted token=${token} pin=${invite.pin} reason=${reason} owner=${invite.ownerSocketId}`
   );
+
   // notify owner if connected
   const ownerWs =
     sockets && sockets.get ? sockets.get(invite.ownerSocketId) : null;
@@ -44,6 +49,7 @@ function deleteInvite(token, reason = "removed", sockets) {
       );
     } catch (e) {}
   }
+
   // fail any pending requests for this invite
   for (const [requestId, pending] of pendingRequests.entries()) {
     if (pending.inviteToken === token) {

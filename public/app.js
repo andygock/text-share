@@ -1,7 +1,10 @@
 (() => {
   // --- Helpers ---
+
   const $ = (sel) => document.getElementById(sel);
+
   const q = (sel) => document.querySelector(sel);
+
   const create = (tag, props = {}, ...children) => {
     const el = document.createElement(tag);
     Object.assign(el, props);
@@ -10,8 +13,11 @@
     );
     return el;
   };
+
   const safeSetText = (el, txt) => {
-    if (el) el.textContent = txt;
+    if (el) {
+      el.textContent = txt;
+    }
   };
 
   // --- DOM ---
@@ -42,8 +48,10 @@
   // --- Config & State ---
   const roomId = window.ROOM_ID;
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+
   // WebSocket instance (will be created/recreated by createAndBindWebSocket)
   let ws = null;
+
   // Reconnect controls
   let reconnectIntervalId = null;
   let reconnectStartTime = 0;
@@ -54,6 +62,7 @@
     const socket = new WebSocket(
       `${protocol}://${window.location.host}/${roomId}`
     );
+
     ws = socket;
 
     socket.onmessage = (ev) => {
@@ -63,13 +72,15 @@
       } catch (e) {
         return;
       }
+
       const h = handlers[m.type];
-      if (h)
+      if (h) {
         try {
           h(m);
         } catch (e) {
           console.error("handler error", e);
         }
+      }
     };
 
     socket.onopen = () => {
@@ -81,6 +92,7 @@
         reconnectIntervalId = null;
         reconnectStartTime = 0;
       }
+
       setGeneralError({ text: "", show: false });
     };
 
@@ -95,6 +107,7 @@
           show: true,
           timeout: false,
         });
+
         reconnectIntervalId = setInterval(() => {
           // stop trying after timeout
           if (Date.now() - reconnectStartTime >= RECONNECT_TIMEOUT) {
@@ -105,14 +118,21 @@
               show: true,
               timeout: false,
             });
+
             // ensure UI reflects disconnected state
             try {
               updateUserList([]);
             } catch (e) {
-              if (el.userListUl) el.userListUl.innerHTML = "";
+              if (el.userListUl) {
+                el.userListUl.innerHTML = "";
+              }
               userCount = 0;
-              if (el.userCountSpan) el.userCountSpan.textContent = "0";
-              if (userCountStickyNum) userCountStickyNum.textContent = "0";
+              if (el.userCountSpan) {
+                el.userCountSpan.textContent = "0";
+              }
+              if (userCountStickyNum) {
+                userCountStickyNum.textContent = "0";
+              }
             }
             setImageUploadEnabled(false);
             setUploadStatus({ text: "", show: false });
@@ -137,13 +157,21 @@
       try {
         updateUserList([]);
       } catch (e) {
-        if (el.userListUl) el.userListUl.innerHTML = "";
+        if (el.userListUl) {
+          el.userListUl.innerHTML = "";
+        }
         userCount = 0;
-        if (el.userCountSpan) el.userCountSpan.textContent = "0";
-        if (userCountStickyNum) userCountStickyNum.textContent = "0";
+        if (el.userCountSpan) {
+          el.userCountSpan.textContent = "0";
+        }
+        if (userCountStickyNum) {
+          userCountStickyNum.textContent = "0";
+        }
       }
+
       setImageUploadEnabled(false);
       setUploadStatus({ text: "", show: false });
+
       // If we're currently reconnecting, show a reconnecting message; otherwise show final error.
       if (reconnectIntervalId) {
         setGeneralError({
@@ -165,8 +193,10 @@
 
   // Create initial connection
   createAndBindWebSocket();
+
   const MAX_IMAGE_UPLOAD_SIZE =
     window.MAX_IMAGE_UPLOAD_SIZE || 10 * 1024 * 1024;
+
   let inputHash = "";
   let currentPin = null;
   let currentPinInterval = null;
@@ -175,6 +205,7 @@
   let userCount = 0;
 
   // --- Utilities ---
+
   function crc32(str) {
     // small crc32 implementation (same as original)
     let crc = 0xffffffff;
@@ -190,19 +221,28 @@
 
   function splitBase64IntoChunks(base64, chunkSize) {
     const chunks = [];
-    for (let i = 0; i < base64.length; i += chunkSize)
+    for (let i = 0; i < base64.length; i += chunkSize) {
       chunks.push(base64.slice(i, i + chunkSize));
+    }
     return chunks;
   }
 
   // --- Status / Error UI ---
+
   function setUploadStatus({ text = "", show = false } = {}) {
-    if (!el.uploadStatus) return;
+    if (!el.uploadStatus) {
+      return;
+    }
+
     el.uploadStatus.textContent = text;
     el.uploadStatus.classList.toggle("visible", show && !!text);
   }
+
   function showUploadError(text, timeout = 2000) {
-    if (!el.uploadError) return;
+    if (!el.uploadError) {
+      return;
+    }
+
     el.uploadError.textContent = text;
     el.uploadError.classList.add("visible");
     setUploadStatus({ text: "", show: false });
@@ -211,16 +251,23 @@
       el.uploadError.textContent = "";
     }, timeout);
   }
+
   function setGeneralError({ text = "", show = false, timeout = 3000 } = {}) {
-    if (!el.generalError) return;
+    if (!el.generalError) {
+      return;
+    }
+
     el.generalError.textContent = text;
     el.generalError.classList.toggle("visible", show && !!text);
-    if (timeout === false) return;
-    if (show && text && timeout > 0)
+    if (timeout === false) {
+      return;
+    }
+    if (show && text && timeout > 0) {
       setTimeout(() => {
         el.generalError.classList.remove("visible");
         el.generalError.textContent = "";
       }, timeout);
+    }
   }
 
   // --- QR Code for Room ---
@@ -240,9 +287,12 @@
   }
 
   // --- User list / UI toggles ---
+
   function updateH1UserCount(count) {
     const elH1 = $("h1-user-count");
-    if (!elH1) return;
+    if (!elH1) {
+      return;
+    }
     if (!count || isNaN(count) || count <= 0) {
       elH1.textContent = "";
       elH1.classList.remove("green");
@@ -253,20 +303,29 @@
     })`;
     elH1.classList.toggle("green", count > 1);
   }
+
   function setImageUploadEnabled(enabled) {
-    if (el.imageInput) el.imageInput.disabled = !enabled;
-    if (el.selectImageBtn) el.selectImageBtn.disabled = !enabled;
-    if (el.dropArea) el.dropArea.classList.toggle("drop-disabled", !enabled);
+    if (el.imageInput) {
+      el.imageInput.disabled = !enabled;
+    }
+    if (el.selectImageBtn) {
+      el.selectImageBtn.disabled = !enabled;
+    }
+    if (el.dropArea) {
+      el.dropArea.classList.toggle("drop-disabled", !enabled);
+    }
     const infoId = "image-upload-info-msg";
     const parent = $("image-share");
     let infoMsg = infoId && document.getElementById(infoId);
     if (!enabled) {
-      if (el.dropArea)
+      if (el.dropArea) {
         el.dropArea.title =
           "You must have at least 2 users in the room to upload images.";
-      if (el.selectImageBtn)
+      }
+      if (el.selectImageBtn) {
         el.selectImageBtn.title =
           "You must have at least 2 users in the room to upload images.";
+      }
       if (!infoMsg && parent) {
         infoMsg = create(
           "div",
@@ -276,63 +335,104 @@
           )
         );
         parent.insertBefore(infoMsg, el.sharedImages);
-      } else if (infoMsg) infoMsg.classList.add("visible");
+      } else if (infoMsg) {
+        infoMsg.classList.add("visible");
+      }
     } else {
-      if (el.dropArea) el.dropArea.title = "";
-      if (el.selectImageBtn) el.selectImageBtn.title = "Select Image";
-      if (infoMsg) infoMsg.classList.remove("visible");
+      if (el.dropArea) {
+        el.dropArea.title = "";
+      }
+      if (el.selectImageBtn) {
+        el.selectImageBtn.title = "Select Image";
+      }
+      if (infoMsg) {
+        infoMsg.classList.remove("visible");
+      }
     }
   }
 
   function addUserToList(ip) {
-    if (!el.userListUl) return;
+    if (!el.userListUl) {
+      return;
+    }
+
     const li = create("li", {}, document.createTextNode(ip));
     li.dataset.ip = ip;
     el.userListUl.appendChild(li);
   }
+
   function removeUserFromList(ip) {
-    if (!el.userListUl) return;
+    if (!el.userListUl) {
+      return;
+    }
+
     const li = el.userListUl.querySelector(`li[data-ip="${ip}"]`);
-    if (li) el.userListUl.removeChild(li);
+    if (li) {
+      el.userListUl.removeChild(li);
+    }
   }
+
   function updateUserList(users = []) {
-    if (!el.userListUl) return;
+    if (!el.userListUl) {
+      return;
+    }
+
     el.userListUl.innerHTML = "";
     users.forEach(addUserToList);
     userCount = users.length;
-    if (el.userCountSpan) el.userCountSpan.textContent = users.length;
-    if (userCountStickyNum) userCountStickyNum.textContent = `${users.length}`;
+    if (el.userCountSpan) {
+      el.userCountSpan.textContent = users.length;
+    }
+    if (userCountStickyNum) {
+      userCountStickyNum.textContent = `${users.length}`;
+    }
     setImageUploadEnabled(userCount > 1);
     updateH1UserCount(userCount);
   }
+
   function addUser(ip) {
     addUserToList(ip);
     userCount = (parseInt(el.userCountSpan?.textContent || "0", 10) || 0) + 1;
-    if (el.userCountSpan) el.userCountSpan.textContent = userCount;
-    if (userCountStickyNum) userCountStickyNum.textContent = `${userCount}`;
+    if (el.userCountSpan) {
+      el.userCountSpan.textContent = userCount;
+    }
+    if (userCountStickyNum) {
+      userCountStickyNum.textContent = `${userCount}`;
+    }
     setImageUploadEnabled(userCount > 1);
     updateH1UserCount(userCount);
   }
+
   function removeUser(ip) {
     removeUserFromList(ip);
     userCount = Math.max(
       0,
       (parseInt(el.userCountSpan?.textContent || "0", 10) || 0) - 1
     );
-    if (el.userCountSpan) el.userCountSpan.textContent = userCount;
-    if (userCountStickyNum) userCountStickyNum.textContent = `${userCount}`;
+    if (el.userCountSpan) {
+      el.userCountSpan.textContent = userCount;
+    }
+    if (userCountStickyNum) {
+      userCountStickyNum.textContent = `${userCount}`;
+    }
     setImageUploadEnabled(userCount > 1);
     updateH1UserCount(userCount);
   }
 
   // --- Barcodes ---
+
   function generateTextAreaBarcodes() {
-    if (!el.sharedTextarea || !el.barcodesDiv) return;
+    if (!el.sharedTextarea || !el.barcodesDiv) {
+      return;
+    }
+
     const lines = el.sharedTextarea.value.split("\n");
     el.barcodesDiv.innerHTML = "";
     lines.forEach((line) => {
       const trimmed = line.trim();
-      if (!trimmed) return;
+      if (!trimmed) {
+        return;
+      }
       const item = create("div", { className: "barcode-item" });
       el.barcodesDiv.appendChild(item);
       try {
@@ -365,23 +465,35 @@
       el.barcodesDiv?.classList.add("open");
     });
   }
-  el.closeBarcodesButton?.addEventListener("click", () => {
-    if (el.barcodesDiv) el.barcodesDiv.innerHTML = "";
-    el.barcodesDiv?.classList.remove("open");
-    el.closeBarcodesButton?.classList.remove("visible");
-    if (el.generateBarcodesButton) el.generateBarcodesButton.disabled = false;
-  });
+
+  if (el.closeBarcodesButton) {
+    el.closeBarcodesButton.addEventListener("click", () => {
+      if (el.barcodesDiv) {
+        el.barcodesDiv.innerHTML = "";
+      }
+      el.barcodesDiv?.classList.remove("open");
+      el.closeBarcodesButton?.classList.remove("visible");
+      if (el.generateBarcodesButton) {
+        el.generateBarcodesButton.disabled = false;
+      }
+    });
+  }
 
   // --- Text sync ---
-  el.sharedTextarea?.addEventListener("input", () => {
-    try {
-      ws.send(
-        JSON.stringify({ type: "textUpdate", text: el.sharedTextarea.value })
-      );
-    } catch (e) {}
-    crc32(el.sharedTextarea.value);
-    if (el.generateBarcodesButton) el.generateBarcodesButton.disabled = false;
-  });
+
+  if (el.sharedTextarea) {
+    el.sharedTextarea.addEventListener("input", () => {
+      try {
+        ws.send(
+          JSON.stringify({ type: "textUpdate", text: el.sharedTextarea.value })
+        );
+      } catch (e) {}
+      crc32(el.sharedTextarea.value);
+      if (el.generateBarcodesButton) {
+        el.generateBarcodesButton.disabled = false;
+      }
+    });
+  }
 
   // --- Images Transfer Protocol (incoming state) ---
   let incomingFilename = "";
@@ -392,10 +504,14 @@
   // --- Message handlers (map instead of big switch) ---
   const handlers = {
     textUpdate: (m) => {
-      if (!el.sharedTextarea) return;
+      if (!el.sharedTextarea) {
+        return;
+      }
       el.sharedTextarea.value = m.text || "";
       crc32(el.sharedTextarea.value);
-      if (el.generateBarcodesButton) el.generateBarcodesButton.disabled = false;
+      if (el.generateBarcodesButton) {
+        el.generateBarcodesButton.disabled = false;
+      }
     },
     userList: (m) => updateUserList(m.users || []),
     userConnected: (m) => addUser(m.ip),
@@ -411,7 +527,9 @@
       });
     },
     imageUploadChunk: (m) => {
-      if (m.filename !== incomingFilename) return;
+      if (m.filename !== incomingFilename) {
+        return;
+      }
       incomingChunks[m.chunkIndex] = m.data;
       incomingTotalChunks = m.totalChunks || incomingTotalChunks;
     },
@@ -424,7 +542,9 @@
       }
     },
     imageUploadComplete: (m) => {
-      if (m.filename !== incomingFilename) return;
+      if (m.filename !== incomingFilename) {
+        return;
+      }
       const base64 = m.data || "";
       const img = create("img", {
         src: `data:${m.mimeType};base64,${base64}`,
@@ -470,8 +590,9 @@
           seconds -= 1;
           if (seconds <= 0) {
             el.pinExpiresSpan.textContent = "(expired)";
-            if (el.pinValueSpan && el.pinValueSpan.textContent === currentPin)
+            if (el.pinValueSpan && el.pinValueSpan.textContent === currentPin) {
               el.pinValueSpan.textContent = "";
+            }
             clearInterval(currentPinInterval);
             currentPinInterval = null;
             currentPin = null;
@@ -484,7 +605,9 @@
     inviteExpired: (m) => {
       if (currentPin && m.pin === currentPin) {
         safeSetText(el.pinValueSpan, "");
-        if (el.pinExpiresSpan) el.pinExpiresSpan.textContent = "(expired)";
+        if (el.pinExpiresSpan) {
+          el.pinExpiresSpan.textContent = "(expired)";
+        }
         if (currentPinInterval) {
           clearInterval(currentPinInterval);
           currentPinInterval = null;
@@ -495,8 +618,9 @@
     inviteRemoved: (m) => {
       if (m && m.pin && currentPin === m.pin) {
         safeSetText(el.pinValueSpan, "");
-        if (el.pinExpiresSpan)
+        if (el.pinExpiresSpan) {
           el.pinExpiresSpan.textContent = `(${m.reason || "removed"})`;
+        }
         if (currentPinInterval) {
           clearInterval(currentPinInterval);
           currentPinInterval = null;
@@ -505,9 +629,12 @@
       }
     },
     joinRequest: (m) => {
-      if (!el.incomingRequestsDiv) return;
+      if (!el.incomingRequestsDiv) {
+        return;
+      }
       const reqDiv = create("div", { className: "incoming-request-item" });
       reqDiv.dataset.requestId = m.requestId || "";
+
       // Build DOM safely to avoid XSS (do not use innerHTML with attacker-controlled values)
       const header = create("div");
       const strong = create(
@@ -564,6 +691,7 @@
   };
 
   // --- Upload logic ---
+
   async function uploadImage(file) {
     isUploading = true;
     currentUploadFilename = file.name;
@@ -615,6 +743,7 @@
       }
       const percent = Math.round(((i + 1) / chunks.length) * 100);
       setUploadStatus({ text: `Uploading... ${percent}%`, show: true });
+
       // throttle to keep UI responsive & match original behavior
       await new Promise((r) => setTimeout(r, 10));
     }
@@ -623,16 +752,18 @@
   }
 
   function handleFileUpload(file) {
-    if (isUploading)
+    if (isUploading) {
       return showUploadError(
         "Only one file upload is allowed at a time. Please wait for the current upload to finish."
       );
-    if (file.size > MAX_IMAGE_UPLOAD_SIZE)
+    }
+    if (file.size > MAX_IMAGE_UPLOAD_SIZE) {
       return showUploadError(
         `File too large. Max allowed is ${Math.floor(
           MAX_IMAGE_UPLOAD_SIZE / 1024 / 1024
         )}MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB.`
       );
+    }
     uploadImage(file).catch((err) => {
       console.error("upload error", err);
       showUploadError("Upload failed.");
@@ -642,28 +773,44 @@
   }
 
   // --- File input / drag & drop ---
-  if (el.selectImageBtn)
-    el.selectImageBtn.addEventListener("click", () => el.imageInput?.click());
-  el.imageInput?.removeAttribute("multiple");
-  el.imageInput?.addEventListener("change", (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    handleFileUpload(f);
-  });
+
+  if (el.selectImageBtn) {
+    el.selectImageBtn.addEventListener("click", () => {
+      if (el.imageInput) {
+        el.imageInput.click();
+      }
+    });
+  }
+
+  if (el.imageInput) {
+    el.imageInput.removeAttribute("multiple");
+    el.imageInput.addEventListener("change", (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) {
+        return;
+      }
+
+      handleFileUpload(f);
+    });
+  }
 
   if (el.dropArea) {
     el.dropArea.addEventListener("dragover", (e) => {
       e.preventDefault();
       el.dropArea.classList.add("dragover");
     });
-    el.dropArea.addEventListener("dragleave", () =>
-      el.dropArea.classList.remove("dragover")
-    );
+
+    el.dropArea.addEventListener("dragleave", () => {
+      el.dropArea.classList.remove("dragover");
+    });
+
     el.dropArea.addEventListener("drop", (e) => {
       e.preventDefault();
       el.dropArea.classList.remove("dragover");
       const f = e.dataTransfer?.files && e.dataTransfer.files[0];
-      if (!f) return;
+      if (!f) {
+        return;
+      }
       handleFileUpload(f);
     });
   }
@@ -672,13 +819,14 @@
   // Note: we already attach click handlers to created Accept/Deny buttons.
 
   // --- Generate pin (owner) ---
-  if (el.generatePinBtn)
+  if (el.generatePinBtn) {
     el.generatePinBtn.addEventListener("click", (e) => {
       e.preventDefault();
       try {
         ws.send(JSON.stringify({ type: "generateInvite" }));
       } catch (err) {}
     });
+  }
 
   // --- Initial state ---
   setImageUploadEnabled(false);

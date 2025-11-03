@@ -14,35 +14,44 @@ function getOrCreateRoom(roomId) {
 }
 
 function canJoinRoom(roomId, clientIp) {
-  if (rooms.size >= MAX_ROOMS)
+  if (rooms.size >= MAX_ROOMS) {
     return { allowed: false, reason: "Maximum number of rooms reached." };
+  }
   const roomClients = getOrCreateRoom(roomId);
-  if (roomClients.size >= MAX_CLIENTS_PER_ROOM)
+  if (roomClients.size >= MAX_CLIENTS_PER_ROOM) {
     return {
       allowed: false,
       reason: "Maximum number of clients in this room reached.",
     };
+  }
   const totalClients = Array.from(rooms.values()).reduce(
     (acc, clients) => acc + clients.size,
     0
   );
-  if (totalClients >= MAX_CLIENTS)
+  if (totalClients >= MAX_CLIENTS) {
     return { allowed: false, reason: "Maximum number of clients reached." };
-  if (!clientIpCount.has(clientIp)) clientIpCount.set(clientIp, 0);
-  if (clientIpCount.get(clientIp) >= MAX_CLIENTS_PER_IP)
+  }
+  if (!clientIpCount.has(clientIp)) {
+    clientIpCount.set(clientIp, 0);
+  }
+  if (clientIpCount.get(clientIp) >= MAX_CLIENTS_PER_IP) {
     return {
       allowed: false,
       reason: "Maximum number of clients per IP reached.",
     };
+  }
   return { allowed: true };
 }
 
 function joinRoom(roomId, ws, clientIp) {
   const roomClients = getOrCreateRoom(roomId);
+
   // ensure ws carries its ip so other code can read it; some older codepaths
   // may rely on ws.ip being set on the object
   try {
-    if (!ws.ip) ws.ip = clientIp;
+    if (!ws.ip) {
+      ws.ip = clientIp;
+    }
   } catch (e) {}
   roomClients.add(ws);
   clientIpCount.set(clientIp, clientIpCount.get(clientIp) + 1);

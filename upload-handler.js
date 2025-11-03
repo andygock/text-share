@@ -12,7 +12,10 @@ async function handleImageUploadChunk(
   MAX_CHUNKS,
   MAX_CHUNK_BYTES
 ) {
-  if (!ws.imageUploadState) return;
+  if (!ws.imageUploadState) {
+    return;
+  }
+
   // Basic filename match
   if (parsed.filename !== ws.imageUploadState.filename) {
     ws.send(
@@ -24,9 +27,11 @@ async function handleImageUploadChunk(
     );
     return;
   }
+
   // Validate indexes and sizes to avoid DoS/memory exhaustion
   const chunkIndex = Number(parsed.chunkIndex);
   const totalChunks = Number(parsed.totalChunks);
+
   if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
     ws.send(
       JSON.stringify({
@@ -37,6 +42,7 @@ async function handleImageUploadChunk(
     );
     return;
   }
+
   if (
     !Number.isInteger(totalChunks) ||
     totalChunks <= 0 ||
@@ -51,6 +57,7 @@ async function handleImageUploadChunk(
     );
     return;
   }
+
   if (!parsed.data || typeof parsed.data !== "string") {
     ws.send(
       JSON.stringify({
@@ -61,8 +68,10 @@ async function handleImageUploadChunk(
     );
     return;
   }
+
   // Approximate chunk bytes when base64-decoded
   const approxBytes = Buffer.byteLength(parsed.data, "base64");
+
   if (approxBytes > MAX_CHUNK_BYTES) {
     ws.send(
       JSON.stringify({
@@ -73,8 +82,10 @@ async function handleImageUploadChunk(
     );
     return;
   }
+
   // Rough estimate of total upload size
   const estimatedTotal = approxBytes * totalChunks;
+
   if (estimatedTotal > MAX_IMAGE_UPLOAD_SIZE * 1.2) {
     ws.send(
       JSON.stringify({
@@ -108,6 +119,7 @@ async function handleImageUploadChunk(
     // overwrite duplicate
     ws.imageUploadState.chunks[chunkIndex] = parsed.data;
   }
+
   ws.imageUploadState.totalChunks = totalChunks;
 
   // Broadcast chunk to all clients (including uploader)
@@ -121,6 +133,7 @@ async function handleImageUploadChunk(
   const progress = Math.round(
     (ws.imageUploadState.received / ws.imageUploadState.totalChunks) * 100
   );
+
   roomClients.forEach((client) => {
     if (client.readyState === 1) {
       client.send(
@@ -140,6 +153,7 @@ async function handleImageUploadChunk(
       const buffer = Buffer.from(base64, "base64");
       const ext = path.extname(ws.imageUploadState.filename).toLowerCase();
       const result = await processImageBuffer(buffer, ext);
+
       if (result.size > 500 * 1024) {
         ws.send(
           JSON.stringify({
@@ -151,6 +165,7 @@ async function handleImageUploadChunk(
         ws.imageUploadState = null;
         return;
       }
+
       // Send complete to all
       roomClients.forEach((client) => {
         if (client.readyState === 1) {

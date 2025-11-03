@@ -1,10 +1,12 @@
 // server.js
 require("dotenv").config(); // Load .env variables
+
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
 const { processImageBuffer } = require("./image-handler");
+
 const {
   rooms,
   getOrCreateRoom,
@@ -41,24 +43,28 @@ const INVITE_TTL_MS = parseInt(process.env.INVITE_TTL_MS, 10) || 30000; // 30s
 const INVITE_MAX_ATTEMPTS = parseInt(process.env.INVITE_MAX_ATTEMPTS, 10) || 5;
 
 // use invites.generateUnique6DigitPin when needed
-
 // use invites.deleteInvite / invites.expireInvite
 
 // Periodically cleanup expired invites
 setInterval(() => {
   const now = Date.now();
   for (const [token, invite] of invites.pendingInvites.entries()) {
-    if (invite.expiresAt <= now) invites.expireInvite(token, sockets);
+    if (invite.expiresAt <= now) {
+      invites.expireInvite(token, sockets);
+    }
   }
 }, 30 * 1000);
+
 // Max image upload size (default 10MB, can override with env var)
 const MAX_IMAGE_UPLOAD_SIZE =
   parseInt(process.env.MAX_IMAGE_UPLOAD_SIZE_BYTES, 10) || 10 * 1024 * 1024;
+
 // Chunking limits to prevent memory/DoS from malformed uploads
 const MAX_CHUNKS = parseInt(process.env.MAX_CHUNKS || "4096", 10);
 const MAX_CHUNK_BYTES = parseInt(process.env.MAX_CHUNK_BYTES || "131072", 10); // 128KB
 
 const server = http.createServer(app);
+
 const wss = new WebSocket.Server({
   server,
   maxPayload: MAX_IMAGE_UPLOAD_SIZE + 1024 * 1024, // allow small margin
@@ -76,6 +82,7 @@ app.get("/join", (req, res) => {
 
 app.get("/:roomId", (req, res) => {
   const roomId = req.params.roomId;
+
   // Basic UUID validation (more robust validation can be added if needed)
   if (
     !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(
@@ -84,10 +91,12 @@ app.get("/:roomId", (req, res) => {
   ) {
     return res.status(400).send("Invalid room ID format.");
   }
+
   res.render("index", { roomId, maxImageUploadSize: MAX_IMAGE_UPLOAD_SIZE });
 });
 
 // Endpoint used by a recipient to request joining a room using a short PIN
+
 app.post("/request-join", async (req, res) => {
   const clientIp =
     req.headers["x-forwarded-for"]?.split(",").shift() ||
@@ -106,16 +115,20 @@ app.post("/request-join", async (req, res) => {
   if (!pin || typeof pin !== "string") {
     return res.status(400).json({ ok: false, error: "Missing pin" });
   }
+
   // Find invite by pin
   const token = invites.pinToToken.get(pin);
-  if (!token)
+  if (!token) {
     return res.status(404).json({ ok: false, error: "No active invite" });
+  }
+
   const invite = invites.pendingInvites.get(token);
   if (!invite || invite.expiresAt <= Date.now() || invite.used) {
     invites.pinToToken.delete(pin);
     invites.pendingInvites.delete(token);
     return res.status(404).json({ ok: false, error: "No active invite" });
   }
+
   // attempt counting
   if (invite.attempts >= invite.maxAttempts) {
     return res
@@ -136,18 +149,23 @@ app.post("/request-join", async (req, res) => {
   const requestId = uuidv4();
   const timeout = setTimeout(() => {
     const pending = invites.pendingRequests.get(requestId);
-    if (!pending) return;
+    if (!pending) {
+      return;
+    }
     try {
       pending.res.json({ ok: false, error: "Timed out waiting for owner" });
     } catch (e) {}
     invites.pendingRequests.delete(requestId);
   }, Math.min(invite.expiresAt - Date.now(), 120000));
+
   invites.pendingRequests.set(requestId, { res, timeout, inviteToken: token });
+
   console.info(
     `invite: join-request id=${requestId} token=${token} from=${clientIp} ua=${(
       req.headers["user-agent"] || ""
     ).slice(0, 200)}`
   );
+
   // Notify owner of the join request
   try {
     ownerWs.send(
@@ -166,6 +184,7 @@ app.post("/request-join", async (req, res) => {
     invites.pendingRequests.delete(requestId);
     return res.status(500).json({ ok: false, error: "Failed to notify owner" });
   }
+
   // do not end response here - it will be fulfilled when owner calls respondInvite via WS
 });
 
@@ -173,6 +192,7 @@ wss.on("connection", (ws, req) => {
   // assign an id for this socket so it can be referenced from invite flows
   ws.id = uuidv4();
   sockets.set(ws.id, ws);
+
   // Parse and validate roomId from the connection URL (ignore querystring)
   const rawPath = (req.url || "/").split("?")[0] || "/";
   const roomId = decodeURIComponent(
@@ -230,6 +250,7 @@ wss.on("connection", (ws, req) => {
         // Ignore non-JSON messages
         return;
       }
+
       // Handle protocol messages
       if (parsed.type === "textUpdate") {
         // --- Rate limiting for text updates ---
@@ -245,6 +266,7 @@ wss.on("connection", (ws, req) => {
           );
           return;
         }
+
         // Broadcast to all other clients
         roomClients.forEach((client) => {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
@@ -255,6 +277,7 @@ wss.on("connection", (ws, req) => {
         });
         return;
       }
+
       // INVITE: owner wants to generate a short PIN for this room
       if (parsed.type === "generateInvite") {
         // Only allow if this ws is in a room (roomId) and is actually part of that room
@@ -273,6 +296,7 @@ wss.on("connection", (ws, req) => {
             maxAttempts: INVITE_MAX_ATTEMPTS,
             used: false,
           };
+
           // If this owner already has an active invite, remove it (only one invite per client)
           for (const [
             existingToken,
@@ -294,6 +318,7 @@ wss.on("connection", (ws, req) => {
           console.info(
             `invite: generated token=${token} pin=${pin} owner=${ws.id} room=${roomId} expiresAt=${invite.expiresAt}`
           );
+
           // Respond to owner with pin
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(
@@ -342,6 +367,7 @@ wss.on("connection", (ws, req) => {
           invites.pendingRequests.delete(requestId);
           return;
         }
+
         // Only the owner can respond
         if (invite.ownerSocketId !== ws.id) {
           if (ws.readyState === WebSocket.OPEN) {
@@ -356,6 +382,7 @@ wss.on("connection", (ws, req) => {
         }
         if (accept) {
           invite.used = true;
+
           // respond to pending HTTP request with room URL so the requester can redirect
           pending.res.json({ ok: true, roomUrl: `/${invite.roomId}` });
           console.info(
@@ -371,6 +398,7 @@ wss.on("connection", (ws, req) => {
         invites.pendingRequests.delete(requestId);
         return;
       }
+
       // Handle image protocol
       if (parsed.type === "imageUploadStart") {
         // Only allow one upload at a time per connection
@@ -385,6 +413,7 @@ wss.on("connection", (ws, req) => {
           );
           return;
         }
+
         // Rate limiting for image uploads
         try {
           await globalUploadLimiter.consume("global");
@@ -399,6 +428,7 @@ wss.on("connection", (ws, req) => {
           );
           return;
         }
+
         // Check upload size
         if (parsed.size > MAX_IMAGE_UPLOAD_SIZE) {
           ws.send(
@@ -412,6 +442,7 @@ wss.on("connection", (ws, req) => {
           );
           return;
         }
+
         // Initialize upload state
         ws.imageUploadState = {
           filename: parsed.filename,
@@ -421,6 +452,7 @@ wss.on("connection", (ws, req) => {
           received: 0,
           totalChunks: null,
         };
+
         // Broadcast start to all clients (including uploader)
         roomClients.forEach((client) => {
           if (client.readyState === WebSocket.OPEN) {
@@ -466,6 +498,7 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => {
     sockets.delete(ws.id);
+
     // Remove any invites owned by this socket and fail pending requests
     for (const [token, invite] of invites.pendingInvites.entries()) {
       if (invite.ownerSocketId === ws.id) {
@@ -479,6 +512,7 @@ wss.on("connection", (ws, req) => {
     console.log(
       `Remaining clients in room ${roomId}: ${getOrCreateRoom(roomId).size}`
     );
+
     // Notify other clients of disconnection
     const currentRoomClients = rooms.get(roomId) || [];
     currentRoomClients.forEach((client) => {
@@ -488,6 +522,7 @@ wss.on("connection", (ws, req) => {
     });
     if (roomIsEmpty) {
       console.log(`Room ${roomId} is empty.`);
+
       // cleanupRoomImages(roomId); // Removed as requested
     }
   });
