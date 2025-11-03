@@ -386,9 +386,21 @@
       if (!el.incomingRequestsDiv) return;
       const reqDiv = create("div", { className: "incoming-request-item" });
       reqDiv.dataset.requestId = m.requestId || "";
-      reqDiv.innerHTML = `<div><strong>Join request</strong> — IP: ${
-        m.requesterIP || "unknown"
-      }</div><div class='incoming-request-ua'>${m.ua || ""}</div>`;
+      // Build DOM safely to avoid XSS (do not use innerHTML with attacker-controlled values)
+      const header = create("div");
+      const strong = create(
+        "strong",
+        {},
+        document.createTextNode("Join request")
+      );
+      header.appendChild(strong);
+      header.appendChild(
+        document.createTextNode(` — IP: ${m.requesterIP || "unknown"}`)
+      );
+      const uaDiv = create("div", { className: "incoming-request-ua" });
+      uaDiv.textContent = m.ua || "";
+      reqDiv.appendChild(header);
+      reqDiv.appendChild(uaDiv);
       const btnAccept = create(
         "button",
         { className: "accept-btn" },
@@ -467,8 +479,23 @@
     isUploading = true;
     currentUploadFilename = file.name;
     setUploadStatus({ text: "Processing image...", show: true });
+    // Convert file to base64 safely using FileReader to avoid spreading large arrays
+    const base64 = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => {
+        try {
+          // fr.result is like: data:<mime-type>;base64,<data>
+          const result = fr.result || "";
+          const comma = result.indexOf(",");
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      fr.onerror = (err) => reject(err);
+      fr.readAsDataURL(file);
+    });
 
-    const arrayBuffer = await file.arrayBuffer();
     try {
       ws.send(
         JSON.stringify({
@@ -479,9 +506,6 @@
         })
       );
     } catch (e) {}
-
-    // base64 encode
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
     const chunkSize = 32 * 1024;
     const chunks = splitBase64IntoChunks(base64, chunkSize);
     for (let i = 0; i < chunks.length; i++) {

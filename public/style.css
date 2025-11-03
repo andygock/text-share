@@ -433,3 +433,21 @@ textarea {
 .green {
   color: green;
 }
+
+.small {
+  font-size: 0.8rem;
+  color: #666;
+  font-weight: normal;
+}
+
+.flex {
+  display: flex;
+  gap: 3px;
+  justify-content: space-between;
+}
+
+.space-between {
+  display: flex;
+  justify-content: space-between;
+  /* align-items: center; */
+}

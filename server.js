@@ -102,13 +102,19 @@ setInterval(() => {
     if (invite.expiresAt <= now) expireInvite(token);
   }
 }, 30 * 1000);
-
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
-
 // Max image upload size (default 10MB, can override with env var)
 const MAX_IMAGE_UPLOAD_SIZE =
   parseInt(process.env.MAX_IMAGE_UPLOAD_SIZE_BYTES, 10) || 10 * 1024 * 1024;
+// Chunking limits to prevent memory/DoS from malformed uploads
+const MAX_CHUNKS = parseInt(process.env.MAX_CHUNKS || "4096", 10);
+const MAX_CHUNK_BYTES = parseInt(process.env.MAX_CHUNK_BYTES || "131072", 10); // 128KB
+
+const server = http.createServer(app);
+const wss = new WebSocket.Server({
+  server,
+  maxPayload: MAX_IMAGE_UPLOAD_SIZE + 1024 * 1024, // allow small margin
+  perMessageDeflate: false,
+});
 
 app.get("/", (req, res) => {
   const uuid = uuidv4();
@@ -211,7 +217,19 @@ wss.on("connection", (ws, req) => {
   // assign an id for this socket so it can be referenced from invite flows
   ws.id = uuidv4();
   sockets.set(ws.id, ws);
-  const roomId = req.url.substring(1); // URL after / is the roomId
+  // Parse and validate roomId from the connection URL (ignore querystring)
+  const rawPath = (req.url || "/").split("?")[0] || "/";
+  const roomId = decodeURIComponent(
+    rawPath.startsWith("/") ? rawPath.substring(1) : rawPath
+  );
+  const uuidRegex =
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+  if (!uuidRegex.test(roomId)) {
+    try {
+      ws.close(1008, "Invalid room ID");
+    } catch (e) {}
+    return;
+  }
   const clientIp =
     req.headers["x-forwarded-for"]?.split(",").shift() ||
     req.socket.remoteAddress ||
@@ -452,15 +470,111 @@ wss.on("connection", (ws, req) => {
         });
       } else if (parsed.type === "imageUploadChunk") {
         if (!ws.imageUploadState) return;
-        ws.imageUploadState.chunks[parsed.chunkIndex] = parsed.data;
-        ws.imageUploadState.received++;
-        ws.imageUploadState.totalChunks = parsed.totalChunks;
+        // Basic filename match
+        if (parsed.filename !== ws.imageUploadState.filename) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Mismatched filename for upload",
+            })
+          );
+          return;
+        }
+        // Validate indexes and sizes to avoid DoS/memory exhaustion
+        const chunkIndex = Number(parsed.chunkIndex);
+        const totalChunks = Number(parsed.totalChunks);
+        if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Invalid chunkIndex",
+            })
+          );
+          return;
+        }
+        if (
+          !Number.isInteger(totalChunks) ||
+          totalChunks <= 0 ||
+          totalChunks > MAX_CHUNKS
+        ) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Invalid totalChunks",
+            })
+          );
+          return;
+        }
+        if (!parsed.data || typeof parsed.data !== "string") {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Missing chunk data",
+            })
+          );
+          return;
+        }
+        // Approximate chunk bytes when base64-decoded
+        const approxBytes = Buffer.byteLength(parsed.data, "base64");
+        if (approxBytes > MAX_CHUNK_BYTES) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Chunk too large",
+            })
+          );
+          return;
+        }
+        // Rough estimate of total upload size
+        const estimatedTotal = approxBytes * totalChunks;
+        if (estimatedTotal > MAX_IMAGE_UPLOAD_SIZE * 1.2) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Upload exceeds allowed size",
+            })
+          );
+          ws.imageUploadState = null;
+          return;
+        }
+
+        // Prevent creating extremely sparse arrays
+        if (totalChunks > MAX_CHUNKS) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename: parsed.filename,
+              error: "Too many chunks",
+            })
+          );
+          ws.imageUploadState = null;
+          return;
+        }
+
+        // Store chunk (do not double-count if re-sent)
+        if (!ws.imageUploadState.chunks[chunkIndex]) {
+          ws.imageUploadState.chunks[chunkIndex] = parsed.data;
+          ws.imageUploadState.received =
+            (ws.imageUploadState.received || 0) + 1;
+        } else {
+          // overwrite duplicate
+          ws.imageUploadState.chunks[chunkIndex] = parsed.data;
+        }
+        ws.imageUploadState.totalChunks = totalChunks;
+
         // Broadcast chunk to all clients (including uploader)
         roomClients.forEach((client) => {
           if (client.readyState === WebSocket.OPEN) {
             client.send(message);
           }
         });
+
         // Progress
         const progress = Math.round(
           (ws.imageUploadState.received / ws.imageUploadState.totalChunks) * 100
@@ -476,6 +590,7 @@ wss.on("connection", (ws, req) => {
             );
           }
         });
+
         // If last chunk, process image
         if (ws.imageUploadState.received === ws.imageUploadState.totalChunks) {
           try {
