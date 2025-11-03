@@ -16,8 +16,18 @@
       if (props.className) {
         el.className = props.className;
       }
+
+      // element-specific attributes (safe whitelist)
       if (props.src) {
         el.src = props.src;
+      }
+      if (props.href) {
+        // set href for anchors (use property so relative URLs are preserved)
+        el.href = props.href;
+      }
+      if (props.download) {
+        // set download attribute for anchors
+        el.download = props.download;
       }
       if (props.alt) {
         el.alt = props.alt;
@@ -30,9 +40,6 @@
       }
       if (props.value) {
         el.value = props.value;
-      }
-      if (props.id) {
-        el.id = props.id;
       }
       if (props.dataset && typeof props.dataset === "object") {
         Object.keys(props.dataset).forEach(
@@ -598,15 +605,20 @@
       }
     },
     imageUploadComplete: (m) => {
+      // Ensure this completion message matches the current incoming file
       if (m.filename !== incomingFilename) {
         return;
       }
 
       // If the server sent the full base64 in m.data use that; otherwise try to reassemble from incomingChunks
       let base64 = m.data || "";
+
+      // Reassemble from chunks if needed
       if (!base64 && incomingChunks && incomingChunks.length) {
         base64 = incomingChunks.join("");
       }
+
+      // Validate we have data
       if (!base64) {
         showUploadError("Incomplete image data received.");
         incomingFilename = "";
@@ -615,7 +627,11 @@
         incomingMimeType = "";
         return;
       }
+
+      // Reconstruct data URL
       const src = `data:${m.mimeType};base64,${base64}`;
+
+      // Create image element
       const img = create("img", {
         src,
         alt: m.filename,
@@ -623,17 +639,30 @@
           m.size / 1024
         )}kB)`,
       });
+
+      // Build info and download link
+      const infoText = `${m.filename} (${m.width}x${m.height}, ${Math.ceil(
+        m.size / 1024
+      )}kB)`;
       const info = create(
-        "div",
-        {},
-        document.createTextNode(
-          `${m.filename} (${m.width}x${m.height}, ${Math.ceil(
-            m.size / 1024
-          )}kB)`
-        )
+        "a",
+        {
+          className: "info",
+          href: src,
+          download: m.filename,
+          title: "Download this image",
+        },
+        document.createTextNode(infoText)
       );
       const wrap = create("div", { className: "shared-image-item" });
-      wrap.appendChild(img);
+
+      // Wrap the image in an anchor so clicking the image downloads it too
+      const imageLink = create(
+        "a",
+        { href: src, download: m.filename, title: `Download ${m.filename}` },
+        img
+      );
+      wrap.appendChild(imageLink);
       wrap.appendChild(info);
       el.sharedImages?.appendChild(wrap);
 
@@ -657,6 +686,8 @@
 
       setUploadStatus({ text: "Image received.", show: true });
       setTimeout(() => setUploadStatus({ text: "", show: false }), 2000);
+
+      // Reset incoming state
       incomingFilename = "";
       incomingChunks = [];
       incomingTotalChunks = 0;
