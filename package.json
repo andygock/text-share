@@ -1,14 +1,14 @@
 {
   "dependencies": {
-    "dotenv": "^16.5.0",
+    "dotenv": "^17.2.3",
     "ejs": "^3.1.10",
-    "express": "^4.21.2",
+    "express": "^5.1.0",
     "helmet": "^8.1.0",
     "qrcodejs": "^1.0.0",
-    "rate-limiter-flexible": "^7.1.1",
-    "sharp": "^0.34.2",
-    "uuid": "^11.1.0",
-    "ws": "^8.18.1"
+    "rate-limiter-flexible": "^8.1.0",
+    "sharp": "^0.34.4",
+    "uuid": "^13.0.0",
+    "ws": "^8.18.3"
   },
   "scripts": {
     "start": "node server.js",
