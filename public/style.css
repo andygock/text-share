@@ -476,3 +476,45 @@ textarea {
   justify-content: space-between;
   /* align-items: center; */
 }
+
+.detected-links-section {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: var(--border);
+  border-radius: var(--border-radius);
+  background: #f7f9ff;
+}
+
+.detected-links-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.detected-links-list {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-height: 1.4rem;
+  font-size: var(--font-size-small);
+}
+
+.detected-links-list[data-empty="true"] {
+  color: #666;
+}
+
+.detected-link {
+  background: #eef4ff;
+  border: 1px solid #c7d6ff;
+  border-radius: var(--border-radius);
+  padding: 0.2rem 0.5rem;
+  font-size: var(--font-size-small);
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.detected-link:hover,
+.detected-link:focus {
+  text-decoration: underline;
+}

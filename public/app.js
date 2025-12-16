@@ -25,6 +25,12 @@
         // set href for anchors (use property so relative URLs are preserved)
         el.href = props.href;
       }
+      if (props.target) {
+        el.target = props.target;
+      }
+      if (props.rel) {
+        el.rel = props.rel;
+      }
       if (props.download) {
         // set download attribute for anchors
         el.download = props.download;
@@ -59,6 +65,75 @@
     }
   };
 
+  const LINK_DETECTION_REGEX =
+    /\b((?:https?:\/\/)?(?:www\.)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:\/\S*)?)/gi;
+  const NO_LINKS_MESSAGE = "No clickable links detected.";
+
+  const normalizeLinkCandidate = (raw) => {
+    if (!raw) {
+      return null;
+    }
+    let trimmed = raw.trim();
+    trimmed = trimmed.replace(/[.,!;:'")\]]+$/, "");
+    if (!trimmed) {
+      return null;
+    }
+    const hasScheme = /^https?:\/\//i.test(trimmed);
+    const href = hasScheme ? trimmed : `https://${trimmed}`;
+    return { display: trimmed, href };
+  };
+
+  const extractDetectedLinks = (text) => {
+    if (!text) {
+      return [];
+    }
+    const regex = new RegExp(LINK_DETECTION_REGEX.source, "gi");
+    const seen = new Set();
+    const matches = [];
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const candidate = match[1] || match[0];
+      const normalized = normalizeLinkCandidate(candidate);
+      if (!normalized) {
+        continue;
+      }
+      if (seen.has(normalized.href)) {
+        continue;
+      }
+      seen.add(normalized.href);
+      matches.push(normalized);
+    }
+    return matches;
+  };
+
+  const renderDetectedLinks = (text) => {
+    if (!el.detectedLinks) {
+      return;
+    }
+    const container = el.detectedLinks;
+    container.textContent = "";
+    const links = extractDetectedLinks(text);
+    if (!links.length) {
+      container.dataset.empty = "true";
+      container.textContent = NO_LINKS_MESSAGE;
+      return;
+    }
+    container.dataset.empty = "false";
+    links.forEach((link) => {
+      const anchor = create(
+        "a",
+        {
+          className: "detected-link",
+          href: link.href,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        },
+        document.createTextNode(link.display)
+      );
+      container.appendChild(anchor);
+    });
+  };
+
   // --- DOM ---
   const el = {
     sharedTextarea: $("sharedText"),
@@ -78,6 +153,7 @@
     sharedImages: $("sharedImages"),
     uploadStatus: $("uploadStatus"),
     uploadError: $("uploadError"),
+    detectedLinks: $("detected-links"),
     generalError: $("generalError"),
   };
 
@@ -550,6 +626,7 @@
 
   if (el.sharedTextarea) {
     el.sharedTextarea.addEventListener("input", () => {
+      renderDetectedLinks(el.sharedTextarea.value);
       safeSend({ type: "textUpdate", text: el.sharedTextarea.value });
       crc32(el.sharedTextarea.value);
       if (el.generateBarcodesButton) {
@@ -572,6 +649,7 @@
       }
       el.sharedTextarea.value = m.text || "";
       crc32(el.sharedTextarea.value);
+      renderDetectedLinks(el.sharedTextarea.value);
       if (el.generateBarcodesButton) {
         el.generateBarcodesButton.disabled = false;
       }
@@ -959,4 +1037,5 @@
 
   // --- Initial state ---
   setImageUploadEnabled(false);
+  renderDetectedLinks(el.sharedTextarea?.value || "");
 })();
