@@ -93,6 +93,36 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
     Simply close the browser tab or window on all devices. Once all users disconnect, the room is automatically cleared on the server and all images are deleted.
 
+## Reverse Proxy Setup
+
+If you run this behind nginx on a VPS, the app will only show real client IPs when it can trust the proxy that is forwarding the request.
+
+Set `TRUSTED_PROXY_IPS` to the IP address of the proxy hop that connects to Node.js. For a common local nginx setup, that is usually:
+
+```env
+TRUSTED_PROXY_IPS=127.0.0.1,::1
+```
+
+If nginx runs on a different machine, use that machine's IP instead of loopback addresses.
+
+Example nginx headers:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
+
+If `TRUSTED_PROXY_IPS` is not set, the server intentionally falls back to the socket address. Behind nginx on the same VPS, that usually means `127.0.0.1` or `::1`.
+
 ### Join by PIN
 
 If scanning a QR code or copying the full URL is not practical, you can use a 6-digit PIN to invite someone into your room. This is shown as a sub-option of "Share the URL":
