@@ -1,13 +1,16 @@
 // invites.js
 // Manages pending invites, pins and pending HTTP join requests
 
+const crypto = require("crypto");
+
 const pendingInvites = new Map(); // token -> invite
 const pinToToken = new Map(); // pin -> token
 const pendingRequests = new Map(); // requestId -> { res, timeout, inviteToken }
 
 function generateUnique6DigitPin() {
   for (let i = 0; i < 10; i++) {
-    const pin = Math.floor(Math.random() * 1000000)
+    const pin = crypto
+      .randomInt(0, 1000000)
       .toString()
       .padStart(6, "0");
     if (!pinToToken.has(pin)) {
@@ -16,7 +19,8 @@ function generateUnique6DigitPin() {
   }
   let pin;
   do {
-    pin = Math.floor(Math.random() * 1000000)
+    pin = crypto
+      .randomInt(0, 1000000)
       .toString()
       .padStart(6, "0");
   } while (pinToToken.has(pin));

@@ -2,7 +2,9 @@
 require("dotenv").config(); // Load .env variables
 
 const express = require("express");
+const helmet = require("helmet");
 const http = require("http");
+const net = require("net");
 const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
 const { processImageBuffer } = require("./image-handler");
@@ -26,8 +28,35 @@ const {
 const app = express();
 
 app.set("view engine", "ejs");
+
+const TRUSTED_PROXY_IPS = (process.env.TRUSTED_PROXY_IPS || "")
+  .split(",")
+  .map((ip) => ip.trim())
+  .filter(Boolean);
+
+if (TRUSTED_PROXY_IPS.length > 0) {
+  app.set("trust proxy", TRUSTED_PROXY_IPS.join(","));
+}
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "base-uri": ["'self'"],
+        "connect-src": ["'self'", "ws:", "wss:"],
+        "img-src": ["'self'", "data:"],
+        "object-src": ["'none'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'"],
+      },
+    },
+    referrerPolicy: { policy: "no-referrer" },
+  })
+);
+
 app.use(express.static("public")); // Serve static files from 'public' directory
-app.use(express.json());
+app.use(express.json({ limit: "16kb" }));
 
 const crypto = require("crypto");
 const { globalJoinLimiter, ipJoinLimiter } = require("./rate-limiter");
@@ -62,6 +91,44 @@ const MAX_IMAGE_UPLOAD_SIZE =
 // Chunking limits to prevent memory/DoS from malformed uploads
 const MAX_CHUNKS = parseInt(process.env.MAX_CHUNKS || "4096", 10);
 const MAX_CHUNK_BYTES = parseInt(process.env.MAX_CHUNK_BYTES || "131072", 10); // 128KB
+const MAX_TEXT_BYTES = parseInt(process.env.MAX_TEXT_BYTES || "65536", 10);
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+const ALLOWED_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+
+function normalizeIp(ip) {
+  if (!ip || typeof ip !== "string") {
+    return "";
+  }
+  if (ip.startsWith("::ffff:")) {
+    return ip.substring(7);
+  }
+  return ip;
+}
+
+function isTrustedProxy(ip) {
+  return TRUSTED_PROXY_IPS.includes(normalizeIp(ip));
+}
+
+function firstForwardedIp(req) {
+  const forwardedFor = req.headers["x-forwarded-for"];
+  if (typeof forwardedFor !== "string") {
+    return null;
+  }
+  const first = forwardedFor.split(",").shift()?.trim();
+  return first && net.isIP(first) ? first : null;
+}
+
+function getClientIp(req) {
+  const remoteAddress = normalizeIp(req.socket.remoteAddress);
+  if (isTrustedProxy(remoteAddress)) {
+    return firstForwardedIp(req) || remoteAddress || "127.0.0.1";
+  }
+  return remoteAddress || "127.0.0.1";
+}
 
 const server = http.createServer(app);
 
@@ -149,10 +216,7 @@ app.get("/:roomId", (req, res) => {
 // Endpoint used by a recipient to request joining a room using a short PIN
 
 app.post("/request-join", async (req, res) => {
-  const clientIp =
-    req.headers["x-forwarded-for"]?.split(",").shift() ||
-    req.socket.remoteAddress ||
-    "127.0.0.1";
+  const clientIp = getClientIp(req);
 
   // rate limit join requests
   try {
@@ -257,10 +321,7 @@ wss.on("connection", (ws, req) => {
     } catch (e) {}
     return;
   }
-  const clientIp =
-    req.headers["x-forwarded-for"]?.split(",").shift() ||
-    req.socket.remoteAddress ||
-    "127.0.0.1";
+  const clientIp = getClientIp(req);
 
   const joinCheck = canJoinRoom(roomId, clientIp);
   if (!joinCheck.allowed) {
@@ -304,6 +365,19 @@ wss.on("connection", (ws, req) => {
 
       // Handle protocol messages
       if (parsed.type === "textUpdate") {
+        if (
+          typeof parsed.text !== "string" ||
+          Buffer.byteLength(parsed.text, "utf8") > MAX_TEXT_BYTES
+        ) {
+          ws.send(
+            JSON.stringify({
+              type: "textUpdateError",
+              error: `Text update exceeds ${MAX_TEXT_BYTES} bytes.`,
+            })
+          );
+          return;
+        }
+
         // --- Rate limiting for text updates ---
         try {
           await globalTextLimiter.consume("global");
@@ -452,6 +526,31 @@ wss.on("connection", (ws, req) => {
 
       // Handle image protocol
       if (parsed.type === "imageUploadStart") {
+        const uploadSize = Number(parsed.size);
+        const filename =
+          typeof parsed.filename === "string" ? parsed.filename : "";
+        const mimeType =
+          typeof parsed.mimeType === "string" ? parsed.mimeType : "";
+        const ext = filename.substring(filename.lastIndexOf(".")).toLowerCase();
+
+        if (
+          !filename ||
+          filename.length > 255 ||
+          !Number.isSafeInteger(uploadSize) ||
+          uploadSize <= 0 ||
+          !ALLOWED_IMAGE_MIME_TYPES.has(mimeType) ||
+          !ALLOWED_IMAGE_EXTENSIONS.has(ext)
+        ) {
+          ws.send(
+            JSON.stringify({
+              type: "imageUploadError",
+              filename,
+              error: "Invalid image upload metadata",
+            })
+          );
+          return;
+        }
+
         // Only allow one upload at a time per connection
         if (ws.imageUploadState) {
           ws.send(
@@ -481,14 +580,14 @@ wss.on("connection", (ws, req) => {
         }
 
         // Check upload size
-        if (parsed.size > MAX_IMAGE_UPLOAD_SIZE) {
+        if (uploadSize > MAX_IMAGE_UPLOAD_SIZE) {
           ws.send(
             JSON.stringify({
               type: "imageUploadError",
-              filename: parsed.filename,
+              filename,
               error: `File too large. Max allowed is ${Math.floor(
                 MAX_IMAGE_UPLOAD_SIZE / 1024 / 1024
-              )}MB. Your file is ${(parsed.size / 1024 / 1024).toFixed(2)}MB.`,
+              )}MB. Your file is ${(uploadSize / 1024 / 1024).toFixed(2)}MB.`,
             })
           );
           return;
@@ -496,11 +595,12 @@ wss.on("connection", (ws, req) => {
 
         // Initialize upload state
         ws.imageUploadState = {
-          filename: parsed.filename,
-          mimeType: parsed.mimeType,
-          size: parsed.size,
+          filename,
+          mimeType,
+          size: uploadSize,
           chunks: [],
           received: 0,
+          receivedBytes: 0,
           totalChunks: null,
         };
 
@@ -510,9 +610,9 @@ wss.on("connection", (ws, req) => {
             client.send(
               JSON.stringify({
                 type: "imageUploadStart",
-                filename: parsed.filename,
-                mimeType: parsed.mimeType,
-                size: parsed.size,
+                filename,
+                mimeType,
+                size: uploadSize,
               })
             );
           }
@@ -523,7 +623,7 @@ wss.on("connection", (ws, req) => {
         const totalChunks = Number(parsed.totalChunks);
         const data = parsed.data || "";
 
-        if (!Number.isFinite(chunkIndex) || chunkIndex < 0) {
+        if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
           ws.send(
             JSON.stringify({
               type: "imageUploadError",
@@ -534,7 +634,7 @@ wss.on("connection", (ws, req) => {
           return;
         }
         if (
-          !Number.isFinite(totalChunks) ||
+          !Number.isInteger(totalChunks) ||
           totalChunks <= 0 ||
           totalChunks > MAX_CHUNKS
         ) {

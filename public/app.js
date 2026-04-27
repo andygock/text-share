@@ -158,7 +158,7 @@
   };
 
   // --- Config & State ---
-  const roomId = window.ROOM_ID;
+  const roomId = window.ROOM_ID || document.body?.dataset.roomId || "";
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
 
   // WebSocket instance (will be created/recreated by createAndBindWebSocket)
@@ -332,7 +332,10 @@
   createAndBindWebSocket();
 
   const MAX_IMAGE_UPLOAD_SIZE =
-    window.MAX_IMAGE_UPLOAD_SIZE || 10 * 1024 * 1024;
+    Number(
+      window.MAX_IMAGE_UPLOAD_SIZE || document.body?.dataset.maxImageUploadSize
+    ) ||
+    10 * 1024 * 1024;
 
   // Limit number of images kept in DOM to avoid unbounded memory growth
   const MAX_IMAGES_SHOWN = 20;

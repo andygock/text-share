@@ -58,12 +58,49 @@ async function handleImageUploadChunk(
     return;
   }
 
+  if (chunkIndex >= totalChunks) {
+    ws.send(
+      JSON.stringify({
+        type: "imageUploadError",
+        filename: parsed.filename,
+        error: "Chunk index exceeds totalChunks",
+      })
+    );
+    return;
+  }
+
+  if (
+    ws.imageUploadState.totalChunks !== null &&
+    ws.imageUploadState.totalChunks !== totalChunks
+  ) {
+    ws.send(
+      JSON.stringify({
+        type: "imageUploadError",
+        filename: parsed.filename,
+        error: "Mismatched totalChunks for upload",
+      })
+    );
+    ws.imageUploadState = null;
+    return;
+  }
+
   if (!parsed.data || typeof parsed.data !== "string") {
     ws.send(
       JSON.stringify({
         type: "imageUploadError",
         filename: parsed.filename,
         error: "Missing chunk data",
+      })
+    );
+    return;
+  }
+
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(parsed.data)) {
+    ws.send(
+      JSON.stringify({
+        type: "imageUploadError",
+        filename: parsed.filename,
+        error: "Invalid chunk encoding",
       })
     );
     return;
@@ -115,6 +152,8 @@ async function handleImageUploadChunk(
   if (!ws.imageUploadState.chunks[chunkIndex]) {
     ws.imageUploadState.chunks[chunkIndex] = parsed.data;
     ws.imageUploadState.received = (ws.imageUploadState.received || 0) + 1;
+    ws.imageUploadState.receivedBytes =
+      (ws.imageUploadState.receivedBytes || 0) + approxBytes;
   } else {
     // overwrite duplicate
     ws.imageUploadState.chunks[chunkIndex] = parsed.data;
@@ -122,12 +161,17 @@ async function handleImageUploadChunk(
 
   ws.imageUploadState.totalChunks = totalChunks;
 
-  // Broadcast chunk to all clients (including uploader)
-  roomClients.forEach((client) => {
-    if (client.readyState === 1) {
-      client.send(JSON.stringify(parsed));
-    }
-  });
+  if (ws.imageUploadState.receivedBytes > MAX_IMAGE_UPLOAD_SIZE) {
+    ws.send(
+      JSON.stringify({
+        type: "imageUploadError",
+        filename: parsed.filename,
+        error: "Upload exceeds allowed size",
+      })
+    );
+    ws.imageUploadState = null;
+    return;
+  }
 
   // Progress
   const progress = Math.round(

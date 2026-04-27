@@ -55,7 +55,10 @@
     />
     <meta name="twitter:image" content="https://ts.gock.net/og-image.jpg" />
   </head>
-  <body>
+  <body
+    data-room-id="<%= roomId %>"
+    data-max-image-upload-size="<%= maxImageUploadSize || 10485760 %>"
+  >
     <div class="container">
       <div id="top">
         <div id="top-left-controls">
@@ -145,11 +148,6 @@
       </footer>
     </div>
 
-    <script>
-      // Safely embed server values as JSON to prevent XSS (do not interpolate raw strings)
-      window.ROOM_ID = <%- JSON.stringify(roomId) %>;
-      window.MAX_IMAGE_UPLOAD_SIZE = Number(<%- JSON.stringify(maxImageUploadSize || 10485760) %>);
-    </script>
     <script src="/app.js"></script>
   </body>
 </html>
