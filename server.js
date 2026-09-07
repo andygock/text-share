@@ -31,6 +31,13 @@ const app = express();
 
 app.set("view engine", "ejs");
 
+// Do not upgrade HTTP LAN assets to HTTPS when the app is intentionally being
+// served without TLS. Enable this in an HTTPS deployment through the normal
+// production setting or the explicit environment flag.
+const enableInsecureRequestUpgrade =
+  process.env.ENABLE_UPGRADE_INSECURE_REQUESTS === "true" ||
+  process.env.NODE_ENV === "production";
+
 const TRUSTED_PROXY_IPS = (process.env.TRUSTED_PROXY_IPS || "")
   .split(",")
   .map((ip) => ip.trim())
@@ -51,13 +58,24 @@ app.use(
         "object-src": ["'none'"],
         "script-src": ["'self'"],
         "style-src": ["'self'"],
+        "upgrade-insecure-requests": enableInsecureRequestUpgrade ? [] : null,
       },
     },
     referrerPolicy: { policy: "no-referrer" },
   })
 );
 
-app.use(express.static("public")); // Serve static files from 'public' directory
+app.use(
+  express.static("public", {
+    // Client code is deployed together with the HTML protocol. Avoid serving
+    // an older JavaScript bundle after a restart or LAN-device deployment.
+    setHeaders: (res, filePath) => {
+      if (/\.(?:js|css|html)$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      }
+    },
+  })
+); // Serve static files from 'public' directory
 app.use(express.json({ limit: "16kb" }));
 
 const crypto = require("crypto");
@@ -201,10 +219,14 @@ server.on("upgrade", (req, socket, head) => {
 
 app.get("/", (req, res) => {
   const uuid = uuidv4();
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
   res.redirect(`/${uuid}`);
 });
 
 app.get("/join", (req, res) => {
+  // The page contains room/session UI; do not let a browser cache an older
+  // template after a deployment changes the CSP or client protocol.
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
   res.render("join");
 });
 
@@ -220,6 +242,7 @@ app.get("/:roomId", (req, res) => {
     return res.status(400).send("Invalid room ID format.");
   }
 
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
   res.render("index", { roomId, maxImageUploadSize: MAX_IMAGE_UPLOAD_SIZE });
 });
 

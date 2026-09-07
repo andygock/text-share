@@ -125,6 +125,8 @@ If `TRUSTED_PROXY_IPS` is not set, the server intentionally falls back to the so
 
 The application resolves forwarded addresses from right to left, stopping at the first untrusted hop. Configure only proxies you control, and have the outermost trusted proxy overwrite `X-Forwarded-Proto`. For HTTPS deployments, set `ALLOWED_ORIGINS` to the public origin, including a non-default port where applicable. When it is unset, the same-origin check recognises `X-Forwarded-Proto: https` only from a trusted immediate proxy.
 
+For HTTP access over a private LAN, leave `ENABLE_UPGRADE_INSECURE_REQUESTS=false` (the default). Enabling CSP's `upgrade-insecure-requests` on an HTTP LAN page upgrades relative JavaScript and WebSocket resources to HTTPS, which requires TLS on the LAN listener.
+
 ### Join by PIN
 
 If scanning a QR code or copying the full URL is not practical, you can use a 6-digit PIN to invite someone into your room. This is shown as a sub-option of "Share the URL":

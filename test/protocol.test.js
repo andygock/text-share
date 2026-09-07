@@ -79,6 +79,22 @@ test("null messages are rejected and rooms are reusable after repeated disconnec
   }
 });
 
+test("room HTML is not cached between CSP/client protocol deployments", async () => {
+  const response = await fetch(`http://127.0.0.1:${port}/`);
+  assert.equal(response.headers.get("cache-control"), "no-store, no-cache, must-revalidate");
+  assert.doesNotMatch(response.headers.get("content-security-policy"), /upgrade-insecure-requests/);
+  const html = await response.text();
+  assert.match(html, /<script src="\/app\.js"><\/script>/);
+  assert.doesNotMatch(html, /<script>(?!\s*<\/script>)/);
+});
+
+test("redirects and client bundles are also not cached", async () => {
+  const redirect = await fetch(`http://127.0.0.1:${port}/`, { redirect: "manual" });
+  assert.equal(redirect.headers.get("cache-control"), "no-store, no-cache, must-revalidate");
+  const script = await fetch(`http://127.0.0.1:${port}/app.js`);
+  assert.equal(script.headers.get("cache-control"), "no-store, no-cache, must-revalidate");
+});
+
 test("trusted proxy chain ignores a forged leftmost address and accepts HTTPS origin", async () => {
   const ws = await connect(randomUUID(), { "X-Forwarded-For": "1.2.3.4, 198.51.100.9",
     "X-Forwarded-Proto": "https", Origin: `https://127.0.0.1:${port}` });
