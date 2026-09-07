@@ -518,3 +518,21 @@ textarea {
 .detected-link:focus {
   text-decoration: underline;
 }
+
+.text-conflict {
+  border-left: 3px solid #b36600;
+  padding: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.text-conflict textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 6rem;
+  max-height: 15rem;
+}
+
+.text-conflict button {
+  margin: 0.5rem 0.5rem 0 0;
+  white-space: normal;
+}

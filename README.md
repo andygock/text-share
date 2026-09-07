@@ -8,7 +8,7 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 **Key Features:**
 
-- **Real-time Synchronization:** Text and images shared on one device instantly appear on all other connected devices in the same room.
+- **Real-time Synchronisation:** Text updates are debounced and acknowledged by the server. New and reconnecting devices receive the current room text. Conflicting edits preserve the local draft and offer a choice of version.
 - **Image Sharing:** Upload or drag-and-drop images (PNG, JPG, WEBP) to share with all users in the room. Images are automatically resampled, compressed, and stripped of metadata for privacy and efficiency. Each image displays its dimensions and file size in the UI, and can be downloaded by any user.
 - **In-Memory Image Handling (No Disk Storage):** Images are never written to disk. All image processing (resizing, compression, metadata removal) is performed in memory, and images are streamed directly to all connected users via WebSocket. This maximizes privacy and ensures no image files are ever stored on the server.
 - **Automatic Image Optimization:** All images are processed on the server to be under 500kB, resized if needed, and have all metadata removed. If an image cannot be compressed below 500kB, the upload is rejected.
@@ -25,7 +25,7 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 - **No Temp Files:** Images are never written to disk. All uploads are processed and streamed in memory only.
 - **Direct Streaming:** Uploaded images are streamed directly to all connected users (including the uploader) using WebSockets, after in-memory processing.
 - **Progress & Info:** Both uploaders and downloaders see real-time progress and image info (dimensions, file size) during transfer.
-- **Maximum Privacy:** No image data is ever stored on the server, even temporarily. This ensures maximum privacy for all users.
+- **Transient Memory Only:** Image bytes exist in server memory during upload and processing, then are released. The current text remains in memory until the last room member disconnects. Connected browsers retain received content until the page is closed or images are removed from the display.
 - **See [Images-Transfer-Protocol.md](./Images-Transfer-Protocol.md) for technical details.**
 
 ## Technology Stack
@@ -39,7 +39,7 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
   - [rate-limiter-flexible](https://github.com/animir/node-rate-limiter-flexible) - For upload rate limiting
 - **Frontend:**
   - HTML5, CSS3, JavaScript (ES6+)
-  - [qrcodejs](https://github.com/davidshimjs/qrcodejs) (via CDN) - For client-side QR code generation
+  - [qrcodejs](https://github.com/davidshimjs/qrcodejs) (served locally) - For client-side QR code generation
 - **Templating:**
   - [EJS](https://ejs.co/) - Embedded JavaScript templates
 
@@ -54,7 +54,7 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 2. **Install Node.js dependencies:**
 
-    I used **pnpm** for this project, but it should work with regular **npm** too.
+    Use **pnpm** and a current Node.js version supporting CommonJS loading of ESM dependencies (Node.js 22.12 or later).
 
     ```bash
     pnpm install
@@ -123,6 +123,8 @@ location / {
 
 If `TRUSTED_PROXY_IPS` is not set, the server intentionally falls back to the socket address. Behind nginx on the same VPS, that usually means `127.0.0.1` or `::1`.
 
+The application resolves forwarded addresses from right to left, stopping at the first untrusted hop. Configure only proxies you control, and have the outermost trusted proxy overwrite `X-Forwarded-Proto`. For HTTPS deployments, set `ALLOWED_ORIGINS` to the public origin, including a non-default port where applicable. When it is unset, the same-origin check recognises `X-Forwarded-Proto: https` only from a trusted immediate proxy.
+
 ### Join by PIN
 
 If scanning a QR code or copying the full URL is not practical, you can use a 6-digit PIN to invite someone into your room. This is shown as a sub-option of "Share the URL":
@@ -133,9 +135,21 @@ If scanning a QR code or copying the full URL is not practical, you can use a 6-
 
 Security notes
 
-- The PIN is short (6 digits) by design for convenience; it is tied to a server-side ephemeral invite and expires quickly (default: 2 minutes).
-- The owner must explicitly Accept the join request; repeated wrong attempts are limited and temporarily blocked.
+- The PIN is short (6 digits) by design for convenience; it is tied to a server-side ephemeral invite and expires quickly (default: 30 seconds).
+- The owner must explicitly accept the join request. Accepting consumes the invite and rejects other requests waiting on that code. HTTP join requests are rate-limited, and each invite permits at most five requests by default.
 - All communication uses the existing WebSocket channel and TLS/WSS when deployed over HTTPS.
+
+### Limits and Recovery
+
+All numeric environment settings must be positive integers. See `.env.example` for defaults. Text limits now apply per `TEXT_LIMIT_WINDOW_SECONDS` (10 seconds by default), rather than per hour; update existing deployments accordingly. The default allowances are 60 updates per IP and 600 globally per window. Upload and join allowances remain hourly.
+
+Uploads require server acknowledgement before chunks are sent. Each transfer has a unique ID, a 60-second deadline, exact byte accounting, and one active upload per connection. At most two images are processed concurrently, with a 40-million-pixel input limit. Busy processing rejects the upload so the sender can retry. Slow recipients exceeding the outgoing buffer limit are disconnected; heartbeat checks reclaim unresponsive connections.
+
+Room URLs grant access to anyone possessing them. PIN approval provides a convenient way to obtain that URL, not a separate authentication layer. Application logs omit room URLs, PINs and invite tokens; configure reverse-proxy access logs separately to avoid recording private room paths. Room pages request that crawlers do not index them.
+
+### Verification
+
+Run `pnpm test` for focused unit and local HTTP/WebSocket protocol regression tests, and `pnpm lint` for static checks. Tests start and stop their own local server and do not use browser automation.
 
 ---
 

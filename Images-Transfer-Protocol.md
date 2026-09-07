@@ -17,19 +17,21 @@ Sent by the uploader to the server to initiate an image upload.
 ```json
 {
   "type": "imageUploadStart",
+  "uploadId": "unique-transfer-id",
   "filename": "example.jpg",
   "mimeType": "image/jpeg",
-  "size": 123456 // original file size in bytes
+  "size": 123456
 }
 ```
 
 ### 2. `imageUploadChunk`
 
-Sent by the uploader to the server, and relayed to all downloaders. Contains a chunk of the image file (ArrayBuffer, base64, or binary).
+Sent by the uploader to the server after an `imageUploadReady` acknowledgement with the same `uploadId`. Original chunks are not relayed to recipients.
 
 ```json
 {
   "type": "imageUploadChunk",
+  "uploadId": "unique-transfer-id",
   "filename": "example.jpg",
   "chunkIndex": 0,
   "totalChunks": 10,
@@ -37,7 +39,7 @@ Sent by the uploader to the server, and relayed to all downloaders. Contains a c
 }
 ```
 
-- `data` is a base64-encoded string representing a chunk of the image file.
+- `data` is a canonical base64-encoded string representing one independently decodable chunk. Identical duplicate chunks are ignored; conflicting duplicates abort the upload. The assembled byte count must match the original declared size exactly.
 
 ### 3. `imageUploadProgress`
 
@@ -46,8 +48,9 @@ Sent by the server to all clients (including uploader) to indicate upload/downlo
 ```json
 {
   "type": "imageUploadProgress",
+  "uploadId": "unique-transfer-id",
   "filename": "example.jpg",
-  "progress": 42 // percent (0-100)
+  "progress": 42
 }
 ```
 
@@ -58,39 +61,42 @@ Sent by the server to all clients when the image transfer is complete, including
 ```json
 {
   "type": "imageUploadComplete",
+  "uploadId": "unique-transfer-id",
   "filename": "example.jpg",
   "mimeType": "image/jpeg",
   "width": 800,
   "height": 600,
-  "size": 456789 // processed file size in bytes
+  "size": 456789,
+  "data": "...complete processed image in base64..."
 }
 ```
 
 ### 5. `imageUploadError`
 
-Sent by the server to the uploader if an error occurs during upload or processing.
+Sent to the uploader for admission failures, or all current room members for an admitted transfer's failure, cancellation or timeout.
 
 ```json
 {
   "type": "imageUploadError",
+  "uploadId": "unique-transfer-id",
   "filename": "example.jpg",
-  "error": "Image could not be compressed below 500kB."
+  "error": "Image could not be compressed below 500 KiB."
 }
 ```
 
 ## Flow
 
 1. Uploader sends `imageUploadStart`.
-2. Uploader sends one or more `imageUploadChunk` messages.
-3. Server processes the image in memory, resampling and compressing as needed.
-4. Server relays `imageUploadChunk` messages to all other clients in the room.
-5. Server sends `imageUploadProgress` messages to all clients as chunks are received/relayed.
-6. When upload is complete and image is processed, server sends `imageUploadComplete` with image info.
-7. If an error occurs, server sends `imageUploadError` to the uploader.
+2. Server admits the transfer, replies with `imageUploadReady`, and broadcasts `imageUploadStart`.
+3. Uploader sends one or more `imageUploadChunk` messages, respecting outgoing backpressure.
+4. Server broadcasts progress, validates exact size and processes the assembled image within its concurrency limit.
+5. Server broadcasts a self-contained `imageUploadComplete` with processed bytes and the actual output MIME type. Clients track transfers by ID, allowing concurrent uploads and identical filenames.
+6. An error, cancellation or deadline ends the transfer and frees its upload state. A sender can cancel using `{ "type": "imageUploadCancel", "uploadId": "unique-transfer-id" }`.
+7. The uploader stays busy until a terminal response, disconnection or timeout. Late native processing results after cancellation are discarded.
 
 ## Notes
 
 - All image data is transferred as base64-encoded strings for compatibility.
-- Clients must reassemble chunks in order and decode base64 to reconstruct the image.
-- Progress is calculated as the percentage of total chunks received/relayed.
+- The server assembles chunks in index order. Recipients decode the complete processed image from `imageUploadComplete.data`.
+- Progress is calculated as the percentage of total chunks received, not processing progress.
 - No image data is written to disk at any point.

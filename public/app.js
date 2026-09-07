@@ -206,7 +206,8 @@
         return;
       }
 
-      const h = handlers[m.type];
+      if (!m || typeof m !== "object") { return; }
+      const h = Object.hasOwn(handlers, m.type) ? handlers[m.type] : null;
       if (h) {
         try {
           h(m);
@@ -229,7 +230,18 @@
       setGeneralError({ text: "", show: false });
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
+      textReady = false;
+      pendingText = null;
+      updateUserList([]);
+      incomingUploads.clear();
+      resetUpload("Connection lost during upload.");
+      el.incomingRequestsDiv?.replaceChildren();
+      if (event.code === 1008 || event.code === 1009) {
+        if (reconnectIntervalId) { clearInterval(reconnectIntervalId); reconnectIntervalId = null; }
+        setGeneralError({ text: event.reason || "Connection rejected.", show: true, timeout: false });
+        return;
+      }
       console.log("WebSocket connection closed");
 
       // Start reconnect attempts if not already started
@@ -345,7 +357,10 @@
   let currentPinInterval = null;
   let isUploading = false;
   let currentUploadFilename = null;
+  let activeUpload = null;
   let userCount = 0;
+  let generalErrorTimer = null;
+  let uploadErrorTimer = null;
 
   // --- Utilities ---
 
@@ -386,10 +401,11 @@
       return;
     }
 
+    clearTimeout(uploadErrorTimer);
     el.uploadError.textContent = text;
     el.uploadError.classList.add("visible");
     setUploadStatus({ text: "", show: false });
-    setTimeout(() => {
+    uploadErrorTimer = setTimeout(() => {
       el.uploadError.classList.remove("visible");
       el.uploadError.textContent = "";
     }, timeout);
@@ -400,13 +416,14 @@
       return;
     }
 
+    clearTimeout(generalErrorTimer);
     el.generalError.textContent = text;
     el.generalError.classList.toggle("visible", show && !!text);
     if (timeout === false) {
       return;
     }
     if (show && text && timeout > 0) {
-      setTimeout(() => {
+      generalErrorTimer = setTimeout(() => {
         el.generalError.classList.remove("visible");
         el.generalError.textContent = "";
       }, timeout);
@@ -626,91 +643,140 @@
   }
 
   // --- Text sync ---
+  // Revisions prevent a stale whole-document update from overwriting another writer.
+  // Local drafts remain in the textarea until accepted or explicitly discarded.
+  let revision = 0;
+  let sharedText = "";
+  let textReady = false;
+  let textDirty = false;
+  let pendingText = null;
+  let textTimer = null;
+  let maxTextBytes = 65536;
+  let textConflict = false;
+  const conflictPanel = create("div", { className: "text-conflict" });
+  conflictPanel.hidden = true;
+  const serverPreview = create("textarea");
+  serverPreview.readOnly = true;
+  serverPreview.setAttribute("aria-label", "Current shared text");
+  const useShared = create("button", { type: "button" }, "Use shared version");
+  const useDraft = create("button", { type: "button" }, "Share my version");
+  conflictPanel.append(create("p", {}, "Text changed on another device. Your draft is preserved above."),
+    serverPreview, useShared, useDraft);
+  el.sharedTextarea?.after(conflictPanel);
 
+  function renderSharedText(text) {
+    el.sharedTextarea.value = text;
+    renderDetectedLinks(text);
+    crc32(text);
+    if (el.generateBarcodesButton) { el.generateBarcodesButton.disabled = false; }
+  }
+
+  function showTextConflict() {
+    textConflict = true;
+    conflictPanel.hidden = false;
+    serverPreview.value = sharedText;
+  }
+
+  function sendText() {
+    clearTimeout(textTimer);
+    if (!textReady || !textDirty || pendingText || textConflict) { return; }
+    const text = el.sharedTextarea.value;
+    if (new TextEncoder().encode(text).length > maxTextBytes) {
+      setGeneralError({ text: `Text exceeds ${maxTextBytes} UTF-8 bytes. Your draft has not been shared.`, show: true, timeout: false });
+      return;
+    }
+    const updateId = makeId();
+    pendingText = { updateId, text };
+    if (!safeSend({ type: "textUpdate", text, baseRevision: revision, updateId })) {
+      pendingText = null;
+    }
+  }
+
+  function receiveText(m) {
+    revision = m.revision;
+    sharedText = m.text;
+    const ownUpdate = pendingText && pendingText.updateId === m.updateId;
+    if (ownUpdate) {
+      pendingText = null;
+      textDirty = el.sharedTextarea.value !== sharedText;
+      setGeneralError({ text: "", show: false });
+      if (textDirty) { textTimer = setTimeout(sendText, 200); }
+    } else if (textDirty) {
+      if (el.sharedTextarea.value === sharedText) {
+        textDirty = false;
+      } else {
+        showTextConflict();
+      }
+    } else {
+      renderSharedText(sharedText);
+    }
+    if (textConflict) { serverPreview.value = sharedText; }
+  }
+
+  useShared.addEventListener("click", () => {
+    if (!textReady) { return; }
+    textDirty = false;
+    textConflict = false;
+    conflictPanel.hidden = true;
+    renderSharedText(sharedText);
+  });
+  useDraft.addEventListener("click", () => {
+    if (!textReady) { return; }
+    textConflict = false;
+    conflictPanel.hidden = true;
+    textDirty = true;
+    sendText();
+  });
   if (el.sharedTextarea) {
     el.sharedTextarea.addEventListener("input", () => {
+      textDirty = true;
       renderDetectedLinks(el.sharedTextarea.value);
-      safeSend({ type: "textUpdate", text: el.sharedTextarea.value });
       crc32(el.sharedTextarea.value);
-      if (el.generateBarcodesButton) {
-        el.generateBarcodesButton.disabled = false;
-      }
+      if (el.generateBarcodesButton) { el.generateBarcodesButton.disabled = false; }
+      clearTimeout(textTimer);
+      textTimer = setTimeout(sendText, 200);
     });
   }
 
-  // --- Images Transfer Protocol (incoming state) ---
-  let incomingFilename = "";
-  let incomingMimeType = "";
-  let incomingChunks = [];
-  let incomingTotalChunks = 0;
+  // Each transfer has an ID, including files with identical names from different users.
+  const incomingUploads = new Map();
 
   // --- Message handlers (map instead of big switch) ---
   const handlers = {
-    textUpdate: (m) => {
-      if (!el.sharedTextarea) {
-        return;
-      }
-      el.sharedTextarea.value = m.text || "";
-      crc32(el.sharedTextarea.value);
-      renderDetectedLinks(el.sharedTextarea.value);
-      if (el.generateBarcodesButton) {
-        el.generateBarcodesButton.disabled = false;
-      }
+    textUpdate: receiveText,
+    textSnapshot: (m) => {
+      maxTextBytes = m.maxTextBytes;
+      textReady = true;
+      receiveText(m);
+      sendText();
+    },
+    textConflict: (m) => {
+      pendingText = null;
+      receiveText(m);
+      if (textDirty) { showTextConflict(); }
     },
     userList: (m) => updateUserList(m.users || []),
     userConnected: (m) => addUser(m.ip),
     userDisconnected: (m) => removeUser(m.ip),
-    imageUploadStart: (m) => {
-      incomingFilename = m.filename || "";
-      incomingMimeType = m.mimeType || "";
-      incomingChunks = [];
-      incomingTotalChunks = 0;
-      setUploadStatus({
-        text: `Receiving image: ${incomingFilename}`,
-        show: true,
-      });
+    imageUploadReady: (m) => {
+      if (activeUpload?.id === m.uploadId) { activeUpload.ready(); }
     },
-    imageUploadChunk: (m) => {
-      if (m.filename !== incomingFilename) {
-        return;
-      }
-      incomingChunks[m.chunkIndex] = m.data;
-      incomingTotalChunks = m.totalChunks || incomingTotalChunks;
+    imageUploadStart: (m) => {
+      incomingUploads.set(m.uploadId, m);
+      setUploadStatus({ text: `Receiving image: ${m.filename}`, show: true });
     },
     imageUploadProgress: (m) => {
-      if (
-        m.filename === incomingFilename &&
-        (!isUploading || m.filename !== currentUploadFilename)
-      ) {
-        setUploadStatus({ text: `Receiving... ${m.progress}%`, show: true });
+      if (incomingUploads.has(m.uploadId)) {
+        setUploadStatus({ text: `Receiving ${m.filename}... ${m.progress}%`, show: true });
       }
     },
     imageUploadComplete: (m) => {
-      // Ensure this completion message matches the current incoming file
-      if (m.filename !== incomingFilename) {
-        return;
-      }
+      incomingUploads.delete(m.uploadId);
+      if (activeUpload?.id === m.uploadId) { resetUpload(); }
+      if (!m.data) { showUploadError("Incomplete image data received."); return; }
 
-      // If the server sent the full base64 in m.data use that; otherwise try to reassemble from incomingChunks
-      let base64 = m.data || "";
-
-      // Reassemble from chunks if needed
-      if (!base64 && incomingChunks && incomingChunks.length) {
-        base64 = incomingChunks.join("");
-      }
-
-      // Validate we have data
-      if (!base64) {
-        showUploadError("Incomplete image data received.");
-        incomingFilename = "";
-        incomingChunks = [];
-        incomingTotalChunks = 0;
-        incomingMimeType = "";
-        return;
-      }
-
-      // Reconstruct data URL
-      const src = `data:${m.mimeType};base64,${base64}`;
+      // Completion is self-contained, including for recipients joining mid-transfer.
+      const src = `data:${m.mimeType};base64,${m.data}`;
 
       // Create image element
       const img = create("img", {
@@ -768,14 +834,20 @@
       setUploadStatus({ text: "Image received.", show: true });
       setTimeout(() => setUploadStatus({ text: "", show: false }), 2000);
 
-      // Reset incoming state
-      incomingFilename = "";
-      incomingChunks = [];
-      incomingTotalChunks = 0;
-      incomingMimeType = "";
+      // Transfer state was removed before rendering the completed image.
     },
-    imageUploadError: (m) =>
-      showUploadError(`Error uploading image: ${m.error || "unknown"}`),
+    imageUploadError: (m) => {
+      incomingUploads.delete(m.uploadId);
+      if (activeUpload?.id === m.uploadId) { resetUpload(m.error || "Upload failed."); }
+      showUploadError(`Error uploading image: ${m.error || "unknown"}`);
+    },
+    joinRequestRemoved: (m) => {
+      for (const item of el.incomingRequestsDiv?.children || []) {
+        if (item.dataset.requestId === m.requestId) { item.remove(); }
+      }
+    },
+    inviteError: (m) => setGeneralError({ text: m.error, show: true }),
+    respondInviteError: (m) => setGeneralError({ text: m.error, show: true }),
     inviteGenerated: (m) => {
       if (currentPinInterval) {
         clearInterval(currentPinInterval);
@@ -857,11 +929,11 @@
         document.createTextNode("Accept")
       );
       btnAccept.addEventListener("click", () => {
-        safeSend({
+        if (!safeSend({
           type: "respondInvite",
           requestId: m.requestId,
           accept: true,
-        });
+        })) { return; }
         if (reqDiv && typeof reqDiv.remove === "function") {
           reqDiv.remove();
         } else if (reqDiv && el.incomingRequestsDiv) {
@@ -874,11 +946,11 @@
       });
       const btnDeny = create("button", {}, document.createTextNode("Deny"));
       btnDeny.addEventListener("click", () => {
-        safeSend({
+        if (!safeSend({
           type: "respondInvite",
           requestId: m.requestId,
           accept: false,
-        });
+        })) { return; }
         if (reqDiv && typeof reqDiv.remove === "function") {
           reqDiv.remove();
         } else if (reqDiv && el.incomingRequestsDiv) {
@@ -895,75 +967,91 @@
       reqDiv.appendChild(btnWrap);
       el.incomingRequestsDiv.appendChild(reqDiv);
     },
-    textUpdateError: (m) =>
-      showUploadError(m.error || "Text update rate limit exceeded."),
+    textUpdateError: (m) => {
+      pendingText = null;
+      setGeneralError({ text: m.error, show: true, timeout: false });
+      if (m.retryAfterMs) { clearTimeout(textTimer); textTimer = setTimeout(sendText, m.retryAfterMs); }
+    },
   };
 
   // --- Upload logic ---
 
+  function makeId() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  function resetUpload(error) {
+    if (!activeUpload) { return; }
+    const upload = activeUpload;
+    activeUpload = null;
+    clearTimeout(upload.timeout);
+    if (error) { upload.reject(new Error(error)); }
+    isUploading = false;
+    currentUploadFilename = null;
+    if (el.imageInput) { el.imageInput.value = ""; }
+  }
+
   async function uploadImage(file) {
     isUploading = true;
     currentUploadFilename = file.name;
-    setUploadStatus({ text: "Processing image...", show: true });
+    const id = makeId();
+    let ready;
+    let reject;
+    const readyPromise = new Promise((resolve, fail) => { ready = resolve; reject = fail; });
+    activeUpload = { id, ready, reject };
+    activeUpload.timeout = setTimeout(() => {
+      if (activeUpload?.id !== id) { return; }
+      safeSend({ type: "imageUploadCancel", uploadId: id });
+      resetUpload("Upload timed out.");
+      showUploadError("Upload timed out.");
+    }, 65000);
+    try {
+      if (!safeSend({ type: "imageUploadStart", uploadId: id, filename: file.name,
+        mimeType: file.type, size: file.size })) {
+        throw new Error("Not connected.");
+      }
+      await readyPromise;
 
-    // Convert file to base64 using file.arrayBuffer() (avoids FileReader)
-    const base64 = await (async () => {
-      // eslint-disable-next-line no-useless-catch
-      try {
-        // Read entire file into an ArrayBuffer
-        const buffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-
-        // Choose a chunk size that's a multiple of 3 so base64 chunking aligns.
-        // 3072 bytes (3 * 1024) is small enough to avoid apply() limits in most browsers.
-        const CHUNK_SIZE = 3 * 1024;
-        let b64 = "";
-
-        for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-          const slice = bytes.subarray(i, i + CHUNK_SIZE);
-
-          // Convert slice to a binary string, then to base64.
-          // String.fromCharCode.apply(null, slice) works for small slices.
-          b64 += btoa(String.fromCharCode.apply(null, slice));
+      // Read only after server admission; chunks are independently base64 encoded.
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const chunkSize = 24 * 1024;
+      const totalChunks = Math.ceil(bytes.length / chunkSize);
+      for (let i = 0; i < totalChunks; i++) {
+        if (activeUpload?.id !== id) { return; }
+        while (ws?.readyState === WebSocket.OPEN && ws.bufferedAmount > 256 * 1024) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          if (activeUpload?.id !== id) { return; }
         }
-
-        return b64;
-      } catch (err) {
-        // propagate error to caller similar to original promise rejection, or do something else later
-        throw err;
+        const slice = bytes.subarray(i * chunkSize, (i + 1) * chunkSize);
+        const data = btoa(String.fromCharCode.apply(null, slice));
+        if (!safeSend({ type: "imageUploadChunk", uploadId: id, filename: file.name,
+          chunkIndex: i, totalChunks, data })) { throw new Error("Connection lost."); }
+        setUploadStatus({ text: `Uploading... ${Math.round((i + 1) / totalChunks * 100)}%`, show: true });
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
-    })();
-
-    safeSend({
-      type: "imageUploadStart",
-      filename: file.name,
-      mimeType: file.type,
-      size: file.size,
-    });
-    const chunkSize = 32 * 1024;
-    const chunks = splitBase64IntoChunks(base64, chunkSize);
-    for (let i = 0; i < chunks.length; i++) {
-      safeSend({
-        type: "imageUploadChunk",
-        filename: file.name,
-        chunkIndex: i,
-        totalChunks: chunks.length,
-        data: chunks[i],
-      });
-      if (el.uploadError && el.uploadError.classList.contains("visible")) {
-        // leave loop but continue sending? original continued, preserve same behavior by continuing
+      if (activeUpload?.id === id) {
+        setUploadStatus({ text: "Processing image...", show: true });
       }
-      const percent = Math.round(((i + 1) / chunks.length) * 100);
-      setUploadStatus({ text: `Uploading... ${percent}%`, show: true });
 
-      // throttle to keep UI responsive & match original behavior
-      await new Promise((r) => setTimeout(r, 10));
+      // Remain busy until the server completes, rejects or times out this upload.
+    } catch (error) {
+      if (activeUpload?.id === id) {
+        safeSend({ type: "imageUploadCancel", uploadId: id });
+        resetUpload();
+      }
+      throw error;
     }
-    isUploading = false;
-    currentUploadFilename = null;
   }
 
   function handleFileUpload(file) {
+    if (userCount < 2 || ws?.readyState !== WebSocket.OPEN) {
+      return showUploadError("Connect another device before uploading.");
+    }
+    if (!file.size || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      return showUploadError("Select a non-empty JPEG, PNG or WebP image.");
+    }
     if (isUploading) {
       return showUploadError(
         "Only one file upload is allowed at a time. Please wait for the current upload to finish."

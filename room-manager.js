@@ -14,10 +14,10 @@ function getOrCreateRoom(roomId) {
 }
 
 function canJoinRoom(roomId, clientIp) {
-  if (rooms.size >= MAX_ROOMS) {
+  if (!rooms.has(roomId) && rooms.size >= MAX_ROOMS) {
     return { allowed: false, reason: "Maximum number of rooms reached." };
   }
-  const roomClients = getOrCreateRoom(roomId);
+  const roomClients = rooms.get(roomId) || new Set();
   if (roomClients.size >= MAX_CLIENTS_PER_ROOM) {
     return {
       allowed: false,
@@ -31,10 +31,7 @@ function canJoinRoom(roomId, clientIp) {
   if (totalClients >= MAX_CLIENTS) {
     return { allowed: false, reason: "Maximum number of clients reached." };
   }
-  if (!clientIpCount.has(clientIp)) {
-    clientIpCount.set(clientIp, 0);
-  }
-  if (clientIpCount.get(clientIp) >= MAX_CLIENTS_PER_IP) {
+  if ((clientIpCount.get(clientIp) || 0) >= MAX_CLIENTS_PER_IP) {
     return {
       allowed: false,
       reason: "Maximum number of clients per IP reached.",
@@ -53,15 +50,21 @@ function joinRoom(roomId, ws, clientIp) {
       ws.ip = clientIp;
     }
   } catch (e) {}
-  roomClients.add(ws);
-  clientIpCount.set(clientIp, clientIpCount.get(clientIp) + 1);
+  if (!roomClients.has(ws)) {
+    roomClients.add(ws);
+    clientIpCount.set(clientIp, (clientIpCount.get(clientIp) || 0) + 1);
+  }
 }
 
 function leaveRoom(roomId, ws, clientIp) {
   const roomClients = rooms.get(roomId);
-  if (roomClients) {
-    roomClients.delete(ws);
-    clientIpCount.set(clientIp, clientIpCount.get(clientIp) - 1);
+  if (roomClients && roomClients.delete(ws)) {
+    const count = (clientIpCount.get(clientIp) || 1) - 1;
+    if (count === 0) {
+      clientIpCount.delete(clientIp);
+    } else {
+      clientIpCount.set(clientIp, count);
+    }
     if (roomClients.size === 0) {
       rooms.delete(roomId);
       return true; // room is now empty

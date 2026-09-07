@@ -1,10 +1,12 @@
 require("dotenv").config();
 const sharp = require("sharp");
+const { positiveInteger } = require("./config");
+const MAX_IMAGE_PIXELS = positiveInteger("MAX_IMAGE_PIXELS", 40000000);
 
 // const UPLOAD_DIR = path.join(__dirname, "public", "uploads");
 
 async function processImageBuffer(inputBuffer, ext) {
-  let image = sharp(inputBuffer);
+  let image = sharp(inputBuffer, { limitInputPixels: MAX_IMAGE_PIXELS });
   const metadata = await image.metadata();
   if (metadata.width > 1280 || metadata.height > 1280) {
     image = image.resize({ width: 1280, height: 1280, fit: "inside" });
@@ -47,6 +49,7 @@ async function processImageBuffer(inputBuffer, ext) {
     width: finalMeta.width,
     height: finalMeta.height,
     size: outputBuffer.length,
+    mimeType: { jpeg: "image/jpeg", png: "image/png", webp: "image/webp" }[finalMeta.format],
   };
 }
 

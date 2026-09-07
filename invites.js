@@ -2,6 +2,7 @@
 // Manages pending invites, pins and pending HTTP join requests
 
 const crypto = require("crypto");
+const { sendJson } = require("./socket-utils");
 
 const pendingInvites = new Map(); // token -> invite
 const pinToToken = new Map(); // pin -> token
@@ -40,7 +41,7 @@ function deleteInvite(token, reason = "removed", sockets) {
   pendingInvites.delete(token);
   pinToToken.delete(invite.pin);
   console.info(
-    `invite: deleted token=${token} pin=${invite.pin} reason=${reason} owner=${invite.ownerSocketId}`
+    `invite: deleted reason=${reason} owner=${invite.ownerSocketId}`
   );
 
   // notify owner if connected
@@ -48,9 +49,7 @@ function deleteInvite(token, reason = "removed", sockets) {
     sockets && sockets.get ? sockets.get(invite.ownerSocketId) : null;
   if (ownerWs && ownerWs.readyState === 1) {
     try {
-      ownerWs.send(
-        JSON.stringify({ type: "inviteRemoved", pin: invite.pin, reason })
-      );
+      sendJson(ownerWs, { type: "inviteRemoved", pin: invite.pin, reason });
     } catch (e) {}
   }
 
@@ -67,7 +66,7 @@ function deleteInvite(token, reason = "removed", sockets) {
 }
 
 function expireInvite(token, sockets) {
-  console.info(`invite: expiring token=${token}`);
+  console.info("invite: expiring");
   deleteInvite(token, "expired", sockets);
 }
 

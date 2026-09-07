@@ -5,6 +5,8 @@ const express = require("express");
 const helmet = require("helmet");
 const http = require("http");
 const net = require("net");
+const { positiveInteger } = require("./config");
+const { sendJson } = require("./socket-utils");
 const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
 const { processImageBuffer } = require("./image-handler");
@@ -35,7 +37,7 @@ const TRUSTED_PROXY_IPS = (process.env.TRUSTED_PROXY_IPS || "")
   .filter(Boolean);
 
 if (TRUSTED_PROXY_IPS.length > 0) {
-  app.set("trust proxy", TRUSTED_PROXY_IPS.join(","));
+  app.set("trust proxy", TRUSTED_PROXY_IPS);
 }
 
 app.use(
@@ -61,15 +63,15 @@ app.use(express.json({ limit: "16kb" }));
 const crypto = require("crypto");
 const { globalJoinLimiter, ipJoinLimiter } = require("./rate-limiter");
 const invites = require("./invites");
-const { handleImageUploadChunk } = require("./upload-handler");
+const { handleImageUploadChunk, startUpload, finishUpload } = require("./upload-handler");
 
 // In-memory invite / request stores
 const sockets = new Map(); // socketId -> ws
 // invites.pendingInvites, invites.pinToToken and invites.pendingRequests are used instead of local maps
 
 // Configurable invite settings
-const INVITE_TTL_MS = parseInt(process.env.INVITE_TTL_MS, 10) || 30000; // 30s
-const INVITE_MAX_ATTEMPTS = parseInt(process.env.INVITE_MAX_ATTEMPTS, 10) || 5;
+const INVITE_TTL_MS = positiveInteger("INVITE_TTL_MS", 30000); // 30s
+const INVITE_MAX_ATTEMPTS = positiveInteger("INVITE_MAX_ATTEMPTS", 5);
 
 // use invites.generateUnique6DigitPin when needed
 // use invites.deleteInvite / invites.expireInvite
@@ -86,12 +88,12 @@ setInterval(() => {
 
 // Max image upload size (default 10MB, can override with env var)
 const MAX_IMAGE_UPLOAD_SIZE =
-  parseInt(process.env.MAX_IMAGE_UPLOAD_SIZE_BYTES, 10) || 10 * 1024 * 1024;
+  positiveInteger("MAX_IMAGE_UPLOAD_SIZE_BYTES", 10 * 1024 * 1024);
 
 // Chunking limits to prevent memory/DoS from malformed uploads
-const MAX_CHUNKS = parseInt(process.env.MAX_CHUNKS || "4096", 10);
-const MAX_CHUNK_BYTES = parseInt(process.env.MAX_CHUNK_BYTES || "131072", 10); // 128KB
-const MAX_TEXT_BYTES = parseInt(process.env.MAX_TEXT_BYTES || "65536", 10);
+const MAX_CHUNKS = positiveInteger("MAX_CHUNKS", 4096);
+const MAX_CHUNK_BYTES = positiveInteger("MAX_CHUNK_BYTES", 131072); // 128KB
+const MAX_TEXT_BYTES = positiveInteger("MAX_TEXT_BYTES", 65536);
 const ALLOWED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -109,25 +111,24 @@ function normalizeIp(ip) {
   return ip;
 }
 
+// Apply Express's trusted-hop policy to both HTTP and upgrade requests.
 function isTrustedProxy(ip) {
-  return TRUSTED_PROXY_IPS.includes(normalizeIp(ip));
-}
-
-function firstForwardedIp(req) {
-  const forwardedFor = req.headers["x-forwarded-for"];
-  if (typeof forwardedFor !== "string") {
-    return null;
-  }
-  const first = forwardedFor.split(",").shift()?.trim();
-  return first && net.isIP(first) ? first : null;
+  const trust = app.get("trust proxy fn");
+  return Boolean(trust && trust(ip, 0));
 }
 
 function getClientIp(req) {
-  const remoteAddress = normalizeIp(req.socket.remoteAddress);
-  if (isTrustedProxy(remoteAddress)) {
-    return firstForwardedIp(req) || remoteAddress || "127.0.0.1";
+  let address = normalizeIp(req.socket.remoteAddress);
+  const trust = app.get("trust proxy fn");
+  const forwarded = typeof req.headers["x-forwarded-for"] === "string"
+    ? req.headers["x-forwarded-for"].split(",").map((ip) => ip.trim()).reverse() : [];
+  for (let i = 0; i < forwarded.length; i++) {
+    if (!trust || !trust(address, i) || !net.isIP(forwarded[i])) {
+      break;
+    }
+    address = normalizeIp(forwarded[i]);
   }
-  return remoteAddress || "127.0.0.1";
+  return address;
 }
 
 const server = http.createServer(app);
@@ -136,14 +137,21 @@ const server = http.createServer(app);
 // verify the Origin header on upgrade requests.
 const wss = new WebSocket.Server({
   noServer: true,
-  maxPayload: MAX_IMAGE_UPLOAD_SIZE + 1024 * 1024, // allow small margin
+  maxPayload: Math.max(MAX_TEXT_BYTES * 6, Math.ceil(MAX_CHUNK_BYTES / 3) * 4) + 4096, // JSON escaping and metadata
   perMessageDeflate: false,
 });
 
 // Allowed origins can be configured via ALLOWED_ORIGINS env var as a comma-separated list.
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim())
+  ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
   : null;
+
+for (const origin of allowedOrigins || []) {
+  const url = new URL(origin);
+  if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) {
+    throw new Error("ALLOWED_ORIGINS must contain HTTP(S) origins without paths");
+  }
+}
 
 // Helper to check origin. If allowedOrigins is set, only allow those. Otherwise allow same-origin (host match).
 function isOriginAllowed(req) {
@@ -160,7 +168,9 @@ function isOriginAllowed(req) {
   if (!host) {
     return false;
   }
-  const expected = `${req.socket.encrypted ? "https" : "http"}://${host}`;
+  const forwardedProtocol = isTrustedProxy(req.socket.remoteAddress) ? req.headers["x-forwarded-proto"] : null;
+  const protocol = forwardedProtocol === "https" ? "https" : req.socket.encrypted ? "https" : "http";
+  const expected = `${protocol}://${host}`;
   return origin === expected;
 }
 
@@ -220,14 +230,14 @@ app.post("/request-join", async (req, res) => {
 
   // rate limit join requests
   try {
-    await globalJoinLimiter.consume("global");
     await ipJoinLimiter.consume(clientIp);
+    await globalJoinLimiter.consume("global");
   } catch (rlErr) {
     return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
   }
 
   const { pin } = req.body || {};
-  if (!pin || typeof pin !== "string") {
+  if (typeof pin !== "string" || !/^[0-9]{6}$/.test(pin)) {
     return res.status(400).json({ ok: false, error: "Missing pin" });
   }
 
@@ -239,8 +249,7 @@ app.post("/request-join", async (req, res) => {
 
   const invite = invites.pendingInvites.get(token);
   if (!invite || invite.expiresAt <= Date.now() || invite.used) {
-    invites.pinToToken.delete(pin);
-    invites.pendingInvites.delete(token);
+    invites.deleteInvite(token, "expired", sockets);
     return res.status(404).json({ ok: false, error: "No active invite" });
   }
 
@@ -274,23 +283,25 @@ app.post("/request-join", async (req, res) => {
   }, Math.min(invite.expiresAt - Date.now(), 120000));
 
   invites.pendingRequests.set(requestId, { res, timeout, inviteToken: token });
+  res.on("close", () => {
+    clearTimeout(timeout);
+    invites.pendingRequests.delete(requestId);
+    sendJson(ownerWs, { type: "joinRequestRemoved", requestId });
+  });
 
   console.info(
-    `invite: join-request id=${requestId} token=${token} from=${clientIp} ua=${(
-      req.headers["user-agent"] || ""
-    ).slice(0, 200)}`
+    `invite: join-request id=${requestId}`
   );
 
   // Notify owner of the join request
   try {
-    ownerWs.send(
-      JSON.stringify({
+    const notified = sendJson(ownerWs, {
         type: "joinRequest",
         requestId,
         requesterIP: clientIp,
         ua: req.headers["user-agent"] || "",
-      })
-    );
+      });
+    if (!notified) { throw new Error("Owner disconnected"); }
     console.info(
       `invite: notified owner ${invite.ownerSocketId} of request ${requestId}`
     );
@@ -306,13 +317,22 @@ app.post("/request-join", async (req, res) => {
 wss.on("connection", (ws, req) => {
   // assign an id for this socket so it can be referenced from invite flows
   ws.id = uuidv4();
-  sockets.set(ws.id, ws);
+
+  // Install safety handlers before any validation can reject this socket.
+  ws.on("error", () => ws.terminate());
+  ws.on("close", () => sockets.delete(ws.id));
+  ws.isAlive = true;
+  ws.on("pong", () => { ws.isAlive = true; });
 
   // Parse and validate roomId from the connection URL (ignore querystring)
   const rawPath = (req.url || "/").split("?")[0] || "/";
-  const roomId = decodeURIComponent(
-    rawPath.startsWith("/") ? rawPath.substring(1) : rawPath
-  );
+  let roomId;
+  try {
+    roomId = decodeURIComponent(rawPath.startsWith("/") ? rawPath.substring(1) : rawPath).toLowerCase();
+  } catch {
+    ws.close(1008, "Invalid room ID");
+    return;
+  }
   const uuidRegex =
     /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
   if (!uuidRegex.test(roomId)) {
@@ -330,29 +350,32 @@ wss.on("connection", (ws, req) => {
   }
 
   joinRoom(roomId, ws, clientIp);
+  sockets.set(ws.id, ws);
   const roomClients = getOrCreateRoom(roomId);
 
   console.log(
-    `Client connected: id=${ws.id} room=${roomId} ip=${clientIp} clients=${roomClients.size}`
+    `Client connected: id=${ws.id} clients=${roomClients.size}`
   );
 
   // Send current user list to the newly connected client
   const userList = Array.from(roomClients).map(
     (client) => client.ip || client._socket?.remoteAddress || "unknown"
   );
-  ws.send(JSON.stringify({ type: "userList", users: userList }));
+  sendJson(ws, { type: "userList", users: userList });
+  roomClients.textState ||= { text: "", revision: 0 };
+  sendJson(ws, { type: "textSnapshot", ...roomClients.textState, maxTextBytes: MAX_TEXT_BYTES });
 
   // Notify other clients of new connection
   roomClients.forEach((client) => {
     if (client !== ws && client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ type: "userConnected", ip: clientIp }));
+      sendJson(client, { type: "userConnected", ip: clientIp });
     }
   });
 
   // WS-level invite messages
   // Supported messages: generateInvite, respondInvite
 
-  ws.on("message", async (message, isBinary) => {
+  async function handleMessage(message, isBinary) {
     // Handle text messages as before
     if (!isBinary) {
       let parsed;
@@ -363,48 +386,56 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || typeof parsed.type !== "string") {
+        sendJson(ws, { type: "protocolError", error: "Expected a message object." });
+        return;
+      }
+
       // Handle protocol messages
       if (parsed.type === "textUpdate") {
         if (
-          typeof parsed.text !== "string" ||
+          typeof parsed.text !== "string" || !Number.isSafeInteger(parsed.baseRevision) ||
+          typeof parsed.updateId !== "string" || parsed.updateId.length > 100 ||
           Buffer.byteLength(parsed.text, "utf8") > MAX_TEXT_BYTES
         ) {
-          ws.send(
-            JSON.stringify({
+          sendJson(ws, {
               type: "textUpdateError",
               error: `Text update exceeds ${MAX_TEXT_BYTES} bytes.`,
-            })
-          );
+            });
           return;
         }
 
         // --- Rate limiting for text updates ---
         try {
-          await globalTextLimiter.consume("global");
           await ipTextLimiter.consume(clientIp);
+          await globalTextLimiter.consume("global");
         } catch (rateErr) {
-          ws.send(
-            JSON.stringify({
+          sendJson(ws, {
               type: "textUpdateError",
               error: "Text update rate limit exceeded. Please try again later.",
-            })
-          );
+              retryAfterMs: Math.max(1000, rateErr.msBeforeNext || 1000),
+            });
           return;
         }
 
-        // Broadcast to all other clients
-        roomClients.forEach((client) => {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(
-              JSON.stringify({ type: "textUpdate", text: parsed.text })
-            );
-          }
-        });
+        if (ws.readyState !== WebSocket.OPEN) { return; }
+        if (parsed.baseRevision !== roomClients.textState.revision) {
+          sendJson(ws, { type: "textConflict", ...roomClients.textState });
+          return;
+        }
+        roomClients.textState = { text: parsed.text, revision: roomClients.textState.revision + 1 };
+
+        // Echo the accepted revision to its sender as a delivery acknowledgement.
+        roomClients.forEach((client) => sendJson(client, { type: "textUpdate",
+          ...roomClients.textState, updateId: client === ws ? parsed.updateId : null }));
         return;
       }
 
       // INVITE: owner wants to generate a short PIN for this room
       if (parsed.type === "generateInvite") {
+        if (Date.now() - (ws.lastInviteAt || 0) < 1000) { return; }
+        ws.lastInviteAt = Date.now();
+
         // Only allow if this ws is in a room (roomId) and is actually part of that room
         // Create invite object
         try {
@@ -435,34 +466,30 @@ wss.on("connection", (ws, req) => {
           // store invite and schedule expiry (keep timeout id so we can clear on replace)
           const timeoutId = setTimeout(
             () => invites.expireInvite(token, sockets),
-            INVITE_TTL_MS + 1000
+            INVITE_TTL_MS
           );
           invite.timeoutId = timeoutId;
           invites.pendingInvites.set(token, invite);
           invites.pinToToken.set(pin, token);
           console.info(
-            `invite: generated token=${token} pin=${pin} owner=${ws.id} room=${roomId} expiresAt=${invite.expiresAt}`
+            `invite: generated owner=${ws.id}`
           );
 
           // Respond to owner with pin
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({
+            sendJson(ws, {
                 type: "inviteGenerated",
                 pin: invite.pin,
                 expiresAt: invite.expiresAt,
-              })
-            );
+              });
           }
         } catch (err) {
           console.error("Failed to generate invite", err);
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({
+            sendJson(ws, {
                 type: "inviteError",
                 error: "Failed to generate invite",
-              })
-            );
+              });
           }
         }
         return;
@@ -471,21 +498,20 @@ wss.on("connection", (ws, req) => {
       // Owner responds to a pending join request
       if (parsed.type === "respondInvite") {
         const { requestId, accept } = parsed;
+        if (typeof requestId !== "string" || typeof accept !== "boolean") { return; }
         const pending = invites.pendingRequests.get(requestId);
         if (!pending) {
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({
+            sendJson(ws, {
                 type: "respondInviteError",
                 error: "Unknown or expired request",
-              })
-            );
+              });
           }
           return;
         }
         const { inviteToken } = pending;
         const invite = invites.pendingInvites.get(inviteToken);
-        if (!invite) {
+        if (!invite || invite.used || invite.expiresAt <= Date.now()) {
           // invite expired
           pending.res.json({ ok: false, error: "Invite expired" });
           clearTimeout(pending.timeout);
@@ -496,12 +522,10 @@ wss.on("connection", (ws, req) => {
         // Only the owner can respond
         if (invite.ownerSocketId !== ws.id) {
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({
+            sendJson(ws, {
                 type: "respondInviteError",
                 error: "Not authorized",
-              })
-            );
+              });
           }
           return;
         }
@@ -511,7 +535,7 @@ wss.on("connection", (ws, req) => {
           // respond to pending HTTP request with room URL so the requester can redirect
           pending.res.json({ ok: true, roomUrl: `/${invite.roomId}` });
           console.info(
-            `invite: accepted requestId=${requestId} token=${inviteToken} owner=${ws.id}`
+            `invite: accepted requestId=${requestId} owner=${ws.id}`
           );
         } else {
           pending.res.json({ ok: false, error: "Denied by owner" });
@@ -521,10 +545,17 @@ wss.on("connection", (ws, req) => {
         }
         clearTimeout(pending.timeout);
         invites.pendingRequests.delete(requestId);
+        if (accept) { invites.deleteInvite(inviteToken, "used", sockets); }
         return;
       }
 
       // Handle image protocol
+      if (parsed.type === "imageUploadCancel") {
+        if (ws.imageUploadState?.uploadId === parsed.uploadId) {
+          finishUpload(ws, roomClients, ws.imageUploadState, "Upload cancelled.");
+        }
+        return;
+      }
       if (parsed.type === "imageUploadStart") {
         const uploadSize = Number(parsed.size);
         const filename =
@@ -534,6 +565,7 @@ wss.on("connection", (ws, req) => {
         const ext = filename.substring(filename.lastIndexOf(".")).toLowerCase();
 
         if (
+          typeof parsed.uploadId !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(parsed.uploadId) ||
           !filename ||
           filename.length > 255 ||
           !Number.isSafeInteger(uploadSize) ||
@@ -541,60 +573,64 @@ wss.on("connection", (ws, req) => {
           !ALLOWED_IMAGE_MIME_TYPES.has(mimeType) ||
           !ALLOWED_IMAGE_EXTENSIONS.has(ext)
         ) {
-          ws.send(
-            JSON.stringify({
+          sendJson(ws, {
               type: "imageUploadError",
+              uploadId: parsed.uploadId,
               filename,
               error: "Invalid image upload metadata",
-            })
-          );
+            });
           return;
         }
 
         // Only allow one upload at a time per connection
         if (ws.imageUploadState) {
-          ws.send(
-            JSON.stringify({
+          sendJson(ws, {
               type: "imageUploadError",
+              uploadId: parsed.uploadId,
               filename: parsed.filename,
               error:
                 "Only one file upload is allowed at a time. Please wait for the current upload to finish.",
-            })
-          );
+            });
           return;
         }
 
         // Rate limiting for image uploads
         try {
-          await globalUploadLimiter.consume("global");
           await ipUploadLimiter.consume(clientIp);
+          await globalUploadLimiter.consume("global");
         } catch (rateErr) {
-          ws.send(
-            JSON.stringify({
+          sendJson(ws, {
               type: "imageUploadError",
+              uploadId: parsed.uploadId,
               filename: parsed.filename,
               error: "Upload rate limit exceeded. Please try again later.",
-            })
-          );
+            });
           return;
         }
 
         // Check upload size
         if (uploadSize > MAX_IMAGE_UPLOAD_SIZE) {
-          ws.send(
-            JSON.stringify({
+          sendJson(ws, {
               type: "imageUploadError",
+              uploadId: parsed.uploadId,
               filename,
               error: `File too large. Max allowed is ${Math.floor(
                 MAX_IMAGE_UPLOAD_SIZE / 1024 / 1024
               )}MB. Your file is ${(uploadSize / 1024 / 1024).toFixed(2)}MB.`,
-            })
-          );
+            });
           return;
         }
 
-        // Initialize upload state
-        ws.imageUploadState = {
+        if (ws.readyState !== WebSocket.OPEN || ws.imageUploadState) { return; }
+        if (Array.from(roomClients).some((client) => client.imageUploadState?.uploadId === parsed.uploadId)) {
+          sendJson(ws, { type: "imageUploadError", uploadId: parsed.uploadId,
+            error: "This transfer ID is already active. Please retry." });
+          return;
+        }
+
+        // Initialise one bounded upload after admission succeeds.
+        startUpload(ws, roomClients, {
+          uploadId: parsed.uploadId,
           filename,
           mimeType,
           size: uploadSize,
@@ -602,97 +638,48 @@ wss.on("connection", (ws, req) => {
           received: 0,
           receivedBytes: 0,
           totalChunks: null,
-        };
+        });
+        sendJson(ws, { type: "imageUploadReady", uploadId: parsed.uploadId });
 
         // Broadcast start to all clients (including uploader)
         roomClients.forEach((client) => {
           if (client.readyState === WebSocket.OPEN) {
-            client.send(
-              JSON.stringify({
+            sendJson(client, {
                 type: "imageUploadStart",
+                uploadId: parsed.uploadId,
                 filename,
                 mimeType,
                 size: uploadSize,
-              })
-            );
+              });
           }
         });
       } else if (parsed.type === "imageUploadChunk") {
-        // Basic validation to avoid DoS via malformed chunk messages before delegating to handler
-        const chunkIndex = Number(parsed.chunkIndex);
-        const totalChunks = Number(parsed.totalChunks);
-        const data = parsed.data || "";
-
-        if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Invalid chunk index",
-            })
-          );
-          return;
-        }
-        if (
-          !Number.isInteger(totalChunks) ||
-          totalChunks <= 0 ||
-          totalChunks > MAX_CHUNKS
-        ) {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Invalid totalChunks",
-            })
-          );
-          return;
-        }
-
-        // Estimate decoded byte length from base64 string length: bytes ~= (len * 3) / 4
-        const base64Len = typeof data === "string" ? data.length : 0;
-        const estimatedBytes = Math.floor((base64Len * 3) / 4);
-        if (estimatedBytes > MAX_CHUNK_BYTES) {
-          ws.send(
-            JSON.stringify({
-              type: "imageUploadError",
-              filename: parsed.filename,
-              error: "Chunk too large",
-            })
-          );
-          return;
-        }
-
-        // delegate to upload handler
-        try {
-          await handleImageUploadChunk(
-            parsed,
-            ws,
-            roomClients,
-            processImageBuffer,
-            MAX_IMAGE_UPLOAD_SIZE,
-            MAX_CHUNKS,
-            MAX_CHUNK_BYTES
-          );
-        } catch (err) {
-          console.error("upload chunk handler error", err);
-          try {
-            ws.send(
-              JSON.stringify({
-                type: "imageUploadError",
-                filename: parsed.filename,
-                error: "Server error processing chunk",
-              })
-            );
-          } catch (e) {}
-          ws.imageUploadState = null;
-        }
+        // Native processing must not block cancellation or subsequent control messages.
+        handleImageUploadChunk(parsed, ws, roomClients, processImageBuffer,
+          MAX_IMAGE_UPLOAD_SIZE, MAX_CHUNKS, MAX_CHUNK_BYTES).catch(() => ws.terminate());
       }
       return;
     }
+  }
+
+  // Serialise protocol admission; processing itself locks its state before yielding.
+  let pendingMessages = 0;
+  let pendingBytes = 0;
+  let chain = Promise.resolve();
+  ws.on("message", (message, isBinary) => {
+    pendingBytes += message.length;
+    if (++pendingMessages > 64 || pendingBytes > 2 * 1024 * 1024) { ws.terminate(); return; }
+    chain = chain.then(() => {
+      if (ws.readyState === WebSocket.OPEN) { return handleMessage(message, isBinary); }
+    }).catch(() => {
+      sendJson(ws, { type: "protocolError", error: "Message processing failed." });
+      ws.terminate();
+    }).finally(() => { pendingMessages--; pendingBytes -= message.length; });
   });
 
   ws.on("close", () => {
     sockets.delete(ws.id);
+    if (ws.imageUploadState) { finishUpload(ws, roomClients, ws.imageUploadState, "Uploader disconnected."); }
 
     // Remove any invites owned by this socket and fail pending requests
     for (const [token, invite] of invites.pendingInvites.entries()) {
@@ -702,36 +689,40 @@ wss.on("connection", (ws, req) => {
     }
     const roomIsEmpty = leaveRoom(roomId, ws, clientIp);
     console.log(
-      `Client disconnected: id=${ws.id} room=${roomId} ip=${clientIp}`
+      `Client disconnected: id=${ws.id}`
     );
     console.log(
-      `Remaining clients in room ${roomId}: ${getOrCreateRoom(roomId).size}`
+      `Remaining clients: ${rooms.get(roomId)?.size || 0}`
     );
 
     // Notify other clients of disconnection
     const currentRoomClients = rooms.get(roomId) || [];
     currentRoomClients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: "userDisconnected", ip: clientIp }));
+        sendJson(client, { type: "userDisconnected", ip: clientIp });
       }
     });
     if (roomIsEmpty) {
-      console.log(`Room ${roomId} is empty.`);
+      console.log("Room is empty.");
 
       // cleanupRoomImages(roomId); // Removed as requested
     }
   });
 
-  ws.on("error", (error) => {
-    console.error(`WebSocket error in room ${roomId}:`, error);
-    leaveRoom(roomId, ws, clientIp);
-    if ((rooms.get(roomId) || []).size === 0) {
-      rooms.delete(roomId);
-    }
-  });
+
 });
 
-const PORT = process.env.PORT || 3000;
+// Heartbeats reclaim half-open connections and their room/upload resources.
+const heartbeat = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (!ws.isAlive) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, 30000);
+heartbeat.unref();
+
+const PORT = positiveInteger("PORT", 3000);
 server.listen(PORT, () => {
   console.log(`Server started on port ${PORT}`);
 });
