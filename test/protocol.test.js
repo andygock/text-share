@@ -18,7 +18,8 @@ before(async () => {
   child = spawn(process.execPath, ["server.js"], { cwd: require("node:path").join(__dirname, ".."),
     env: { ...process.env, PORT: String(port), ALLOWED_ORIGINS: "", TRUSTED_PROXY_IPS: "127.0.0.1,::1",
       PER_IP_UPLOAD_LIMIT: "100", GLOBAL_UPLOAD_LIMIT: "200", UPLOAD_TIMEOUT_MS: "250",
-      INVITE_TTL_MS: "3000", GLOBAL_TEXT_LIMIT: "600", PER_IP_TEXT_LIMIT: "60" },
+      INVITE_TTL_MS: "3000", GLOBAL_TEXT_LIMIT: "600", PER_IP_TEXT_LIMIT: "60",
+      TEXT_HISTORY_ENABLED: "true" },
     stdio: ["ignore", "pipe", "pipe"] });
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Server failed to start")), 10000);

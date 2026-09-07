@@ -23,7 +23,7 @@ function element(tag = "div") {
   };
 }
 
-function client() {
+function client(historyEnabled = true) {
   const elements = new Map();
   const get = (id) => {
     if (!elements.has(id)) { elements.set(id, element()); }
@@ -48,7 +48,9 @@ function client() {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8"), context);
   socket.onopen();
   const receive = (message) => socket.onmessage({ data: JSON.stringify(message) });
-  receive({ type: "textSnapshot", text: "", revision: 0, maxTextBytes: 65536 });
+  receive(historyEnabled
+    ? { type: "textSnapshot", text: "", revision: 0, maxTextBytes: 65536 }
+    : { type: "textMode", historyEnabled: false, maxTextBytes: 65536 });
   return { get, socket, receive, flush: () => {
     const pending = [...timers.values()]; timers.clear(); pending.forEach((fn) => fn());
   } };
@@ -73,6 +75,26 @@ test("client debounces updates and preserves its draft during a revision conflic
   c.receive({ type: "textUpdate", revision: 2, text: update.text, updateId: update.updateId });
   assert.equal(textarea.value, "newer draft");
   assert.equal(textarea.afterElement.hidden, true);
+});
+
+test("relay-only client sends and applies deltas without snapshot state", () => {
+  const sender = client(false), textarea = sender.get("sharedText");
+  textarea.value = "hello";
+  textarea.handlers.input();
+  sender.flush();
+  assert.deepEqual(sender.socket.sent[0], {
+    type: "textDelta", start: 0, deleteCount: 0, insert: "hello",
+  });
+  textarea.value = "hello there";
+  textarea.handlers.input();
+  sender.flush();
+  assert.deepEqual(sender.socket.sent[1], {
+    type: "textDelta", start: 5, deleteCount: 0, insert: " there",
+  });
+
+  const lateJoiner = client(false);
+  lateJoiner.receive(sender.socket.sent[1]);
+  assert.equal(lateJoiner.get("sharedText").value, " there");
 });
 
 test("client renders simultaneous same-name transfers and self-contained late completions", () => {

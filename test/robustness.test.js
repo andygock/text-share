@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const room = require("../room-manager");
 const { handleImageUploadChunk, startUpload, finishUpload } = require("../upload-handler");
 const { sendJson } = require("../socket-utils");
-const { positiveInteger } = require("../config");
+const { booleanFlag, positiveInteger } = require("../config");
 
 function socket() {
   return { readyState: 1, bufferedAmount: 0, messages: [],
@@ -30,6 +30,18 @@ test("room admission is read-only and departures are idempotent", () => {
   room.leaveRoom("shared", a, "ip");
   assert.equal(room.clientIpCount.get("ip"), 1);
   room.leaveRoom("shared", b, "ip");
+});
+
+test("the final departure explicitly destroys retained room text", () => {
+  room.rooms.clear();
+  room.clientIpCount.clear();
+  const ws = socket();
+  room.joinRoom("history", ws, "ip");
+  const clients = room.rooms.get("history");
+  clients.textState = { text: "private text", revision: 1 };
+  room.leaveRoom("history", ws, "ip");
+  assert.equal(clients.textState, null);
+  assert.equal(room.rooms.has("history"), false);
 });
 
 test("rejected IP admission does not allocate rooms", () => {
@@ -132,4 +144,15 @@ test("invalid numeric configuration fails explicitly", () => {
   process.env.TEST_NUMERIC_LIMIT = "NaN";
   assert.throws(() => positiveInteger("TEST_NUMERIC_LIMIT", 10), /positive integer/);
   delete process.env.TEST_NUMERIC_LIMIT;
+});
+
+test("boolean configuration accepts only explicit true or false", () => {
+  process.env.TEST_BOOLEAN_FLAG = "true";
+  assert.equal(booleanFlag("TEST_BOOLEAN_FLAG"), true);
+  process.env.TEST_BOOLEAN_FLAG = "false";
+  assert.equal(booleanFlag("TEST_BOOLEAN_FLAG", true), false);
+  process.env.TEST_BOOLEAN_FLAG = "yes";
+  assert.throws(() => booleanFlag("TEST_BOOLEAN_FLAG"), /true or false/);
+  delete process.env.TEST_BOOLEAN_FLAG;
+  assert.equal(booleanFlag("TEST_BOOLEAN_FLAG"), false);
 });

@@ -653,6 +653,8 @@
   let textTimer = null;
   let maxTextBytes = 65536;
   let textConflict = false;
+  let textHistoryEnabled = null;
+  let relayBaseline = el.sharedTextarea?.value || "";
   const conflictPanel = create("div", { className: "text-conflict" });
   conflictPanel.hidden = true;
   const serverPreview = create("textarea");
@@ -679,10 +681,23 @@
 
   function sendText() {
     clearTimeout(textTimer);
-    if (!textReady || !textDirty || pendingText || textConflict) { return; }
+    if (!textReady || !textDirty || pendingText ||
+      (textHistoryEnabled && textConflict)) { return; }
     const text = el.sharedTextarea.value;
     if (new TextEncoder().encode(text).length > maxTextBytes) {
       setGeneralError({ text: `Text exceeds ${maxTextBytes} UTF-8 bytes. Your draft has not been shared.`, show: true, timeout: false });
+      return;
+    }
+    if (!textHistoryEnabled) {
+      const delta = calculateTextDelta(relayBaseline, text);
+      if (!delta) {
+        textDirty = false;
+        return;
+      }
+      if (safeSend({ type: "textDelta", ...delta })) {
+        relayBaseline = text;
+        textDirty = false;
+      }
       return;
     }
     const updateId = makeId();
@@ -690,6 +705,47 @@
     if (!safeSend({ type: "textUpdate", text, baseRevision: revision, updateId })) {
       pendingText = null;
     }
+  }
+
+  function calculateTextDelta(previous, next) {
+    if (previous === next) { return null; }
+    let start = 0;
+    while (start < previous.length && start < next.length &&
+      previous[start] === next[start]) {
+      start++;
+    }
+    let previousEnd = previous.length;
+    let nextEnd = next.length;
+    while (previousEnd > start && nextEnd > start &&
+      previous[previousEnd - 1] === next[nextEnd - 1]) {
+      previousEnd--;
+      nextEnd--;
+    }
+    return {
+      start,
+      deleteCount: previousEnd - start,
+      insert: next.slice(start, nextEnd),
+    };
+  }
+
+  function receiveTextDelta(m) {
+    if (textHistoryEnabled !== false || !Number.isSafeInteger(m.start) ||
+      !Number.isSafeInteger(m.deleteCount) || typeof m.insert !== "string") {
+      return;
+    }
+
+    // Flush an unsent local edit before applying the incoming operation. A
+    // client joining mid-session has no base document, so out-of-range
+    // positions are clamped and only newly relayed content becomes visible.
+    if (textDirty) { sendText(); }
+    const current = el.sharedTextarea.value;
+    const start = Math.min(Math.max(0, m.start), current.length);
+    const deleteCount = Math.min(Math.max(0, m.deleteCount), current.length - start);
+    const next = current.slice(0, start) + m.insert + current.slice(start + deleteCount);
+    if (new TextEncoder().encode(next).length > maxTextBytes) { return; }
+    relayBaseline = next;
+    textDirty = false;
+    renderSharedText(next);
   }
 
   function receiveText(m) {
@@ -744,7 +800,19 @@
   // --- Message handlers (map instead of big switch) ---
   const handlers = {
     textUpdate: receiveText,
+    textDelta: receiveTextDelta,
+    textMode: (m) => {
+      textHistoryEnabled = false;
+      maxTextBytes = m.maxTextBytes;
+      textReady = true;
+      pendingText = null;
+      textConflict = false;
+      conflictPanel.hidden = true;
+      relayBaseline = el.sharedTextarea?.value || "";
+      textDirty = false;
+    },
     textSnapshot: (m) => {
+      textHistoryEnabled = true;
       maxTextBytes = m.maxTextBytes;
       textReady = true;
       receiveText(m);

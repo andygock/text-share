@@ -8,11 +8,11 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 
 **Key Features:**
 
-- **Real-time Synchronisation:** Text updates are debounced and acknowledged by the server. New and reconnecting devices receive the current room text. Conflicting edits preserve the local draft and offer a choice of version.
+- **Real-time Synchronisation:** Text updates are debounced and shared between connected devices. Optional in-memory history gives new and reconnecting devices the current room text, with revision checks that preserve conflicting local drafts.
 - **Image Sharing:** Upload or drag-and-drop images (PNG, JPG, WEBP) to share with all users in the room. Images are automatically resampled, compressed, and stripped of metadata for privacy and efficiency. Each image displays its dimensions and file size in the UI, and can be downloaded by any user.
 - **In-Memory Image Handling (No Disk Storage):** Images are never written to disk. All image processing (resizing, compression, metadata removal) is performed in memory, and images are streamed directly to all connected users via WebSocket. This maximizes privacy and ensures no image files are ever stored on the server.
 - **Automatic Image Optimization:** All images are processed on the server to be under 500kB, resized if needed, and have all metadata removed. If an image cannot be compressed below 500kB, the upload is rejected.
-- **No Persistent Text/Data Storage:** No text or user data is stored persistently on the server. Text and user presence exist only in memory while users are connected.
+- **Optional Text History:** Relay-only mode sends live edit deltas without retaining room text. When in-memory history is enabled, the server retains only the latest text and revision while the room has connected users; it does not keep a version log or write text to disk.
 - **Privacy Focused:** Designed with privacy in mind. No accounts, no tracking, no persistent server-side storage of your text or images.
 - **Minimalist UI:** Clean and simple user interface for easy use on any device.
 - **QR Code for Easy Sharing:** A QR code of the unique URL is automatically generated, making it easy to open the same room on mobile devices.
@@ -25,7 +25,7 @@ Real-time Text & Image Share is a simple and privacy-focused web application tha
 - **No Temp Files:** Images are never written to disk. All uploads are processed and streamed in memory only.
 - **Direct Streaming:** Uploaded images are streamed directly to all connected users (including the uploader) using WebSockets, after in-memory processing.
 - **Progress & Info:** Both uploaders and downloaders see real-time progress and image info (dimensions, file size) during transfer.
-- **Transient Memory Only:** Image bytes exist in server memory during upload and processing, then are released. The current text remains in memory until the last room member disconnects. Connected browsers retain received content until the page is closed or images are removed from the display.
+- **Transient Memory Only:** Image bytes exist in server memory during upload and processing, then are released. When text history is enabled, the current text remains in memory until the last room member disconnects. Connected browsers retain received content independently of server storage.
 - **See [Images-Transfer-Protocol.md](./Images-Transfer-Protocol.md) for technical details.**
 
 ## Technology Stack
@@ -144,6 +144,12 @@ Security notes
 ### Limits and Recovery
 
 All numeric environment settings must be positive integers. See `.env.example` for defaults. Text limits now apply per `TEXT_LIMIT_WINDOW_SECONDS` (10 seconds by default), rather than per hour; update existing deployments accordingly. The default allowances are 60 updates per IP and 600 globally per window. Upload and join allowances remain hourly.
+
+`TEXT_HISTORY_ENABLED=false` is the privacy-first default. The server validates and broadcasts compact text operations containing a start position, deletion count and inserted text, but does not attach a text state to the room. New or reconnecting clients receive no previous content and begin with only deltas received after connecting. Because there is no authoritative baseline or revision in this mode, simultaneous edits are best-effort and clients that join midway may display only the newly changed fragments.
+
+Set `TEXT_HISTORY_ENABLED=true` when reconnect recovery and consistent conflict handling matter more than transient server retention. In this mode the server stores one current text value and revision per active room; each accepted edit replaces that value, so there is no revision history. It sends the current value when a client joins or reconnects.
+
+The application-level retained value is destroyed synchronously when the room's final WebSocket disconnects: the text field is cleared, the state reference is removed and the room is deleted from the in-memory map. JavaScript strings cannot be securely zeroed, so V8 reclaims the now-unreachable underlying memory during a later garbage-collection cycle. An unresponsive connection is terminated by the 30-second heartbeat after it misses a heartbeat response, which then triggers the same cleanup. A process restart or shutdown also discards every room. There is no idle expiry while at least one responsive client remains connected.
 
 Uploads require server acknowledgement before chunks are sent. Each transfer has a unique ID, a 60-second deadline, exact byte accounting, and one active upload per connection. At most two images are processed concurrently, with a 40-million-pixel input limit. Busy processing rejects the upload so the sender can retry. Slow recipients exceeding the outgoing buffer limit are disconnected; heartbeat checks reclaim unresponsive connections.
 

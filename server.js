@@ -5,7 +5,7 @@ const express = require("express");
 const helmet = require("helmet");
 const http = require("http");
 const net = require("net");
-const { positiveInteger } = require("./config");
+const { booleanFlag, positiveInteger } = require("./config");
 const { sendJson } = require("./socket-utils");
 const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
@@ -112,6 +112,7 @@ const MAX_IMAGE_UPLOAD_SIZE =
 const MAX_CHUNKS = positiveInteger("MAX_CHUNKS", 4096);
 const MAX_CHUNK_BYTES = positiveInteger("MAX_CHUNK_BYTES", 131072); // 128KB
 const MAX_TEXT_BYTES = positiveInteger("MAX_TEXT_BYTES", 65536);
+const TEXT_HISTORY_ENABLED = booleanFlag("TEXT_HISTORY_ENABLED", false);
 const ALLOWED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -385,8 +386,22 @@ wss.on("connection", (ws, req) => {
     (client) => client.ip || client._socket?.remoteAddress || "unknown"
   );
   sendJson(ws, { type: "userList", users: userList });
-  roomClients.textState ||= { text: "", revision: 0 };
-  sendJson(ws, { type: "textSnapshot", ...roomClients.textState, maxTextBytes: MAX_TEXT_BYTES });
+  if (TEXT_HISTORY_ENABLED) {
+    roomClients.textState ||= { text: "", revision: 0 };
+    sendJson(ws, {
+      type: "textSnapshot",
+      ...roomClients.textState,
+      historyEnabled: true,
+      maxTextBytes: MAX_TEXT_BYTES,
+    });
+  } else {
+    // Relay mode sends no previous text because the server has retained none.
+    sendJson(ws, {
+      type: "textMode",
+      historyEnabled: false,
+      maxTextBytes: MAX_TEXT_BYTES,
+    });
+  }
 
   // Notify other clients of new connection
   roomClients.forEach((client) => {
@@ -415,15 +430,23 @@ wss.on("connection", (ws, req) => {
       }
 
       // Handle protocol messages
-      if (parsed.type === "textUpdate") {
+      if (parsed.type === "textUpdate" || parsed.type === "textDelta") {
+        const isHistoryUpdate = parsed.type === "textUpdate";
         if (
-          typeof parsed.text !== "string" || !Number.isSafeInteger(parsed.baseRevision) ||
-          typeof parsed.updateId !== "string" || parsed.updateId.length > 100 ||
-          Buffer.byteLength(parsed.text, "utf8") > MAX_TEXT_BYTES
+          (isHistoryUpdate &&
+            (!TEXT_HISTORY_ENABLED || typeof parsed.text !== "string" ||
+              !Number.isSafeInteger(parsed.baseRevision) ||
+              typeof parsed.updateId !== "string" || parsed.updateId.length > 100 ||
+              Buffer.byteLength(parsed.text, "utf8") > MAX_TEXT_BYTES)) ||
+          (!isHistoryUpdate &&
+            (TEXT_HISTORY_ENABLED || !Number.isSafeInteger(parsed.start) || parsed.start < 0 ||
+              !Number.isSafeInteger(parsed.deleteCount) || parsed.deleteCount < 0 ||
+              typeof parsed.insert !== "string" ||
+              Buffer.byteLength(parsed.insert, "utf8") > MAX_TEXT_BYTES))
         ) {
           sendJson(ws, {
               type: "textUpdateError",
-              error: `Text update exceeds ${MAX_TEXT_BYTES} bytes.`,
+              error: "Invalid text update for the configured text mode.",
             });
           return;
         }
@@ -442,6 +465,19 @@ wss.on("connection", (ws, req) => {
         }
 
         if (ws.readyState !== WebSocket.OPEN) { return; }
+        if (!isHistoryUpdate) {
+          roomClients.forEach((client) => {
+            if (client !== ws) {
+              sendJson(client, {
+                type: "textDelta",
+                start: parsed.start,
+                deleteCount: parsed.deleteCount,
+                insert: parsed.insert,
+              });
+            }
+          });
+          return;
+        }
         if (parsed.baseRevision !== roomClients.textState.revision) {
           sendJson(ws, { type: "textConflict", ...roomClients.textState });
           return;

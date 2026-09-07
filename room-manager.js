@@ -66,6 +66,12 @@ function leaveRoom(roomId, ws, clientIp) {
       clientIpCount.set(clientIp, count);
     }
     if (roomClients.size === 0) {
+      // Remove the authoritative text while this Set is still reachable from
+      // socket close handlers. This makes room-history destruction immediate.
+      if (roomClients.textState) {
+        roomClients.textState.text = "";
+        roomClients.textState = null;
+      }
       rooms.delete(roomId);
       return true; // room is now empty
     }
