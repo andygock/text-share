@@ -8,32 +8,42 @@
   </head>
   <body class="join-body">
     <div id="join-page" class="container">
-      <a class="brand join-brand" href="/"><span class="brand-mark" aria-hidden="true">ts</span><span>Text share</span></a>
-      <main class="panel join-panel">
-      <span class="eyebrow">CONNECT A DEVICE</span>
-      <h1>Join with PIN</h1>
-      <p class="muted">
-        Enter the 6-digit PIN given to you by the person sharing their room.
-      </p>
-      <form id="joinForm">
-        <label for="pinInput">Room PIN</label>
-        <input
-          id="pinInput"
-          name="pin"
-          placeholder="123456"
-          maxlength="6"
-          inputmode="numeric"
-          pattern="[0-9]{6}"
-          required
-          autocomplete="off"
-          autofocus
+      <a class="brand join-brand" href="/">
+        <img
+          class="brand-mark"
+          src="/apple-touch-icon.png"
+          alt=""
+          aria-hidden="true"
         />
-        <button id="requestJoinBtn" type="submit">Request to join <span aria-hidden="true">→</span></button>
-      </form>
-      <div id="joinStatus" role="status" aria-live="polite"></div>
-      <p class="create-link">
-        Or you can <a href="/">create your own new room</a>.
-      </p>
+        <span>Text share</span>
+      </a>
+      <main class="panel join-panel">
+        <span class="eyebrow">CONNECT A DEVICE</span>
+        <h1>Join with PIN</h1>
+        <p class="muted">
+          Enter the 6-digit PIN given to you by the person sharing their room.
+        </p>
+        <form id="joinForm">
+          <label for="pinInput">Room PIN</label>
+          <input
+            id="pinInput"
+            name="pin"
+            placeholder="123456"
+            maxlength="6"
+            inputmode="numeric"
+            pattern="[0-9]{6}"
+            required
+            autocomplete="off"
+            autofocus
+          />
+          <button id="requestJoinBtn" type="submit">
+            Request to join <span aria-hidden="true">→</span>
+          </button>
+        </form>
+        <div id="joinStatus" role="status" aria-live="polite"></div>
+        <p class="create-link">
+          Or you can <a href="/">create your own new room</a>.
+        </p>
       </main>
     </div>
     <script src="/join.js"></script>

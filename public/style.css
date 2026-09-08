@@ -29,16 +29,19 @@
   --danger-text: #be123c;
   --radius: 8px;
   --mono: "Geist Mono", ui-monospace, monospace;
-  font-family: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    "Geist",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   font-size: 13px;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
 }
 
 * {
-
   box-sizing: border-box;
-
 }
 body {
   margin: 0;
@@ -46,10 +49,15 @@ body {
   color: var(--foreground);
   line-height: 1.5;
 }
-button, input, textarea {
+button,
+input,
+textarea {
   font: inherit;
 }
-button, a, input, textarea {
+button,
+a,
+input,
+textarea {
   -webkit-tap-highlight-color: transparent;
 }
 a {
@@ -60,7 +68,8 @@ a:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-button, .button {
+button,
+.button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -75,9 +84,12 @@ button, .button {
   font-weight: 500;
   line-height: 20px;
   cursor: pointer;
-  transition: background-color 120ms, border-color 120ms;
+  transition:
+    background-color 120ms,
+    border-color 120ms;
 }
-button:hover, .button:hover {
+button:hover,
+.button:hover {
   background: #3f3f46;
   text-decoration: none;
 }
@@ -91,7 +103,8 @@ button:hover, .button:hover {
   background: var(--subtle);
   border-color: #d4d4d8;
 }
-button:disabled, .button:disabled {
+button:disabled,
+.button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -99,7 +112,9 @@ button:disabled, .button:disabled {
   outline: 2px solid #a1a1aa;
   outline-offset: 3px;
 }
-h1, h2, p {
+h1,
+h2,
+p {
   margin: 0;
 }
 h1 {
@@ -129,22 +144,20 @@ h2 {
   gap: 16px;
   border-bottom: 1px solid var(--border);
 }
-.brand, nav {
+.brand,
+nav {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 .brand-mark {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 29px;
   height: 29px;
   flex: 0 0 auto;
   border-radius: 7px;
   background: var(--foreground);
-  color: white;
-  font: 500 15px var(--mono);
-  letter-spacing: -1px;
+  object-fit: cover;
 }
 .header-divider {
   height: 16px;
@@ -254,7 +267,8 @@ textarea:focus-visible {
   margin-right: auto;
   font-size: 11px;
 }
-#generate-barcodes, #close-barcodes {
+#generate-barcodes,
+#close-barcodes {
   min-height: 27px;
   padding: 2px 8px;
   font-size: 11px;
@@ -284,7 +298,8 @@ textarea:focus-visible {
   border-radius: 6px;
   background: #fff;
 }
-#qrcode img, #qrcode canvas {
+#qrcode img,
+#qrcode canvas {
   max-width: 100%;
 }
 .qr-row p {
@@ -311,7 +326,9 @@ textarea:focus-visible {
   text-align: center;
   color: var(--muted);
 }
-.pin-value:empty, .pin-expires:empty, #incoming-requests:empty {
+.pin-value:empty,
+.pin-expires:empty,
+#incoming-requests:empty {
   display: none;
 }
 #userList {
@@ -355,17 +372,18 @@ textarea:focus-visible {
   color: var(--muted);
   font-weight: normal;
 }
-.flex, .space-between {
+.flex,
+.space-between {
   display: flex;
   gap: 6px;
   justify-content: space-between;
 }
 
 .barcodes {
-
   display: none;
 
-  /* hidden until populated */ flex-wrap: wrap;
+  /* hidden until populated */
+  flex-wrap: wrap;
 
   align-items: flex-start;
 
@@ -378,7 +396,6 @@ textarea:focus-visible {
   border: 1px solid var(--border);
 
   border-radius: var(--radius);
-
 }
 .barcodes.open {
   display: flex;
@@ -526,7 +543,9 @@ textarea:focus-visible {
 }
 
 /* Status elements use the client's existing visibility classes. */
-.upload-status, .upload-error, .general-error {
+.upload-status,
+.upload-error,
+.general-error {
   display: none;
   padding: 8px 12px;
   margin: 0 12px 12px;
@@ -549,7 +568,9 @@ textarea:focus-visible {
   color: #92400e;
   border: 1px solid #fde68a;
 }
-.upload-status.visible, .upload-error.visible, .general-error.visible {
+.upload-status.visible,
+.upload-error.visible,
+.general-error.visible {
   display: block;
 }
 .upload-progress-bar {
@@ -581,7 +602,8 @@ textarea:focus-visible {
   font: 400 11px/1.6 var(--mono);
   overflow-wrap: anywhere;
 }
-.detected-link:hover, .detected-link:focus {
+.detected-link:hover,
+.detected-link:focus {
   text-decoration: underline;
   background: var(--subtle);
 }
@@ -690,7 +712,8 @@ textarea:focus-visible {
   .container {
     padding: 0 16px;
   }
-  .header-caption, .header-divider {
+  .header-caption,
+  .header-divider {
     display: none;
   }
   #top {
@@ -715,7 +738,8 @@ textarea:focus-visible {
     min-height: 64px;
     gap: 8px;
   }
-  .brand, nav {
+  .brand,
+  nav {
     gap: 6px;
   }
   .app-header .button {
@@ -753,7 +777,9 @@ textarea:focus-visible {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     transition: none !important;
   }
 }
