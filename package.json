@@ -1,14 +1,14 @@
 {
   "dependencies": {
-    "dotenv": "^17.2.3",
+    "dotenv": "^17.4.2",
     "ejs": "^3.1.10",
-    "express": "^5.1.0",
-    "helmet": "^8.1.0",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
     "qrcodejs": "^1.0.0",
-    "rate-limiter-flexible": "^8.1.0",
-    "sharp": "^0.34.4",
-    "uuid": "^13.0.0",
-    "ws": "^8.18.3"
+    "rate-limiter-flexible": "^8.3.0",
+    "sharp": "^0.34.5",
+    "uuid": "^13.0.2",
+    "ws": "^8.21.3"
   },
   "scripts": {
     "start": "node server.js",
@@ -17,8 +17,8 @@
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.0",
-    "eslint": "^9.39.0",
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
     "globals": "^16.5.0"
   }
 }
