@@ -60,89 +60,161 @@
     data-max-image-upload-size="<%= maxImageUploadSize || 10485760 %>"
   >
     <div class="container">
+      <header id="header" class="app-header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">ts</span>
+          <h1>text share</h1>
+          <span class="header-divider" aria-hidden="true"></span>
+          <span class="muted header-caption"
+            >Text & images, between devices</span
+          >
+        </div>
+        <nav aria-label="Room navigation">
+          <a class="button button-secondary" href="/join">Join with PIN</a>
+          <a class="button" href="/"
+            >New room <span aria-hidden="true">+</span></a
+          >
+        </nav>
+      </header>
+      <div class="workspace-heading">
+        <div><h2>Your shared room</h2></div>
+        <span
+          id="h1-user-count"
+          class="h1-user-count"
+          aria-live="polite"
+        ></span>
+      </div>
       <div id="top">
-        <div id="top-left-controls">
-          <div id="qrcode"></div>
-          <div id="pin-share">
-            <button class="button" id="generate-pin">Share with PIN</button>
-            <span id="pin-value" class="pin-value"></span>
-            <span id="pin-expires" class="pin-expires"></span>
-            <div id="incoming-requests"></div>
-          </div>
-        </div>
-        <div id="text-content">
-          <div id="header">
-            <h1>
-              Real-time Text & Image Share
-              <span id="h1-user-count" class="h1-user-count"></span>
-            </h1>
-            <div>
-              <a href="/">New Room</a> or
-              <a href="/join">Join Room with PIN</a>
+        <aside id="top-left-controls" aria-label="Room details">
+          <section class="panel share-panel">
+            <div class="panel-heading">
+              <h2>Connect a device</h2>
+              <span class="badge">Room</span>
             </div>
-          </div>
-          <textarea
-            id="sharedText"
-            placeholder="Start typing to share..."
-          ></textarea>
-          <div class="textarea-barcode-controls">
-            <button class="button" id="generate-barcodes">
-              Generate QRCodes for Text
-            </button>
-            <button id="close-barcodes" title="Hide QR Codes">✕</button>
-          </div>
-        </div>
-      </div>
+            <div class="qr-row">
+              <div
+                id="qrcode"
+                role="img"
+                aria-label="Scan to open this room"
+              ></div>
+              <p class="muted">Scan the QR code or share this page’s URL.</p>
+            </div>
+            <div id="pin-share">
+              <button class="button button-secondary" id="generate-pin">
+                Generate sharing PIN
+              </button>
+              <span id="pin-value" class="pin-value"></span>
+              <span id="pin-expires" class="pin-expires"></span>
+              <div id="incoming-requests"></div>
+            </div>
+          </section>
+          <section class="users-info panel">
+            <div class="panel-heading">
+              <h2>Connected devices</h2>
+              <span id="userCount" class="badge">0</span>
+            </div>
+            <ul id="userList"></ul>
+            <p class="muted privacy-note">
+              Your IP address is visible to others in this room.
+            </p>
+          </section>
+        </aside>
+        <main id="text-content">
+          <section class="panel editor-panel" aria-labelledby="text-heading">
+            <div class="panel-heading">
+              <h2 id="text-heading">
+                <label for="sharedText">Shared text</label>
+              </h2>
+              <span class="muted">Syncs as you type</span>
+            </div>
+            <textarea
+              id="sharedText"
+              placeholder="Type or paste something to share…"
+              spellcheck="false"
+            ></textarea>
+            <div class="textarea-barcode-controls">
+              <span class="muted editor-hint"
+                >Plain text · Real-time sharing</span
+              >
+              <button class="button button-secondary" id="generate-barcodes">
+                Text to QR codes
+              </button>
+              <button
+                id="close-barcodes"
+                class="button-secondary"
+                title="Hide QR codes"
+                aria-label="Hide QR codes"
+              >
+                ✕
+              </button>
+            </div>
+          </section>
 
-      <div id="generalError" class="general-error"></div>
-      <div class="barcodes"></div>
-      <div id="image-share">
-        <div class="space-between">
-          <h2>Images</h2>
-          <div>Image will be resized on receipt</div>
-        </div>
-        <form id="imageUploadForm" enctype="multipart/form-data">
-          <input
-            type="file"
-            id="imageInput"
-            name="image"
-            accept="image/png,image/jpeg,image/webp"
-            multiple="{false}"
-          />
-          <div id="dropArea">
-            Drag & Drop or
-            <button type="button" id="selectImageBtn">Select Image</button>
-          </div>
-        </form>
-        <!-- Upload status indicator -->
-        <div id="uploadStatus" class="upload-status"></div>
-        <div id="uploadError" class="upload-error"></div>
-        <progress
-          id="uploadProgressBar"
-          class="upload-progress-bar"
-          max="100"
-          value="0"
-        ></progress>
-        <div id="sharedImages"></div>
-      </div>
-
-      <div class="users-info">
-        <div>
-          Your IP address will be visible to other users in this room. Connected
-          users: <span id="userCount">0</span>.
-        </div>
-        <ul id="userList"></ul>
-      </div>
-      <div class="detected-links-section" aria-live="polite">
-        <div class="detected-links-label">Clickable links from textarea</div>
-        <div id="detected-links" class="detected-links-list" data-empty="true">
-          No clickable links detected.
-        </div>
+          <div id="generalError" class="general-error" role="alert"></div>
+          <div class="barcodes"></div>
+          <section id="image-share" class="panel">
+            <div class="panel-heading">
+              <h2>Images</h2>
+              <span class="muted">Resized on receipt</span>
+            </div>
+            <form id="imageUploadForm" enctype="multipart/form-data">
+              <input
+                type="file"
+                id="imageInput"
+                name="image"
+                accept="image/png,image/jpeg,image/webp"
+              />
+              <div id="dropArea">
+                <span class="upload-icon" aria-hidden="true">↑</span>
+                <div>
+                  <span
+                    >Drop an image here, or
+                    <button type="button" id="selectImageBtn">
+                      browse files
+                    </button></span
+                  >
+                  <p class="muted">
+                    PNG, JPEG or WebP · Up to <%= Math.round((maxImageUploadSize
+                    || 10485760) / 1048576) %> MiB
+                  </p>
+                </div>
+              </div>
+            </form>
+            <!-- Upload status indicator -->
+            <div id="uploadStatus" class="upload-status" role="status"></div>
+            <div id="uploadError" class="upload-error" role="alert"></div>
+            <progress
+              id="uploadProgressBar"
+              class="upload-progress-bar"
+              max="100"
+              value="0"
+              aria-label="Image upload progress"
+            ></progress>
+            <div id="sharedImages"></div>
+          </section>
+          <section class="detected-links-section panel" aria-live="polite">
+            <div class="panel-heading">
+              <h2 class="detected-links-label">Detected links</h2>
+              <span class="muted">From shared text</span>
+            </div>
+            <div
+              id="detected-links"
+              class="detected-links-list"
+              data-empty="true"
+            >
+              No clickable links detected.
+            </div>
+          </section>
+        </main>
       </div>
       <footer class="footer">
+        <span>Instant sharing. No account needed.</span>
         <p>
-          <a href="https://github.com/andygock/text-share" target="_blank"
-            >GitHub</a
+          <a
+            href="https://github.com/andygock/text-share"
+            target="_blank"
+            rel="noopener noreferrer"
+            >GitHub <span aria-hidden="true">↗</span></a
           >
         </p>
       </footer>
