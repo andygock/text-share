@@ -19,7 +19,7 @@ before(async () => {
     env: { ...process.env, PORT: String(port), ALLOWED_ORIGINS: "", TRUSTED_PROXY_IPS: "127.0.0.1,::1",
       PER_IP_UPLOAD_LIMIT: "100", GLOBAL_UPLOAD_LIMIT: "200", UPLOAD_TIMEOUT_MS: "250",
       INVITE_TTL_MS: "3000", GLOBAL_TEXT_LIMIT: "600", PER_IP_TEXT_LIMIT: "60",
-      TEXT_HISTORY_ENABLED: "true" },
+      TEXT_HISTORY_ENABLED: "true", NODE_ENV: "production", ENABLE_UPGRADE_INSECURE_REQUESTS: "false" },
     stdio: ["ignore", "pipe", "pipe"] });
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Server failed to start")), 10000);

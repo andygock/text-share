@@ -3,13 +3,13 @@ import globals from "globals";
 import { defineConfig } from "eslint/config";
 
 export default defineConfig([
+  { ignores: ["public/qrcode.min.js"] },
   {
     files: ["**/*.{js,mjs,cjs}"],
     plugins: { js },
     extends: ["js/recommended"],
-    ignores: ["public/qrcode.min.js"],
     rules: {
-      "no-unused-vars": "off",
+      "no-unused-vars": ["error", { caughtErrors: "none" }],
       "no-empty": "off",
       curly: "error",
       "lines-around-comment": [
@@ -22,8 +22,17 @@ export default defineConfig([
         },
       ],
     },
+  },
+  {
+    files: ["**/*.{js,mjs,cjs}"],
+    ignores: ["public/**"],
+    languageOptions: { globals: globals.node },
+  },
+  {
+    files: ["public/**/*.js"],
     languageOptions: {
-      globals: { ...globals.browser, ...globals.node, QRCode: "readonly" },
+      sourceType: "script",
+      globals: { ...globals.browser, QRCode: "readonly" },
     },
   },
 ]);

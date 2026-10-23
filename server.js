@@ -35,8 +35,7 @@ app.set("view engine", "ejs");
 // served without TLS. Enable this in an HTTPS deployment through the normal
 // production setting or the explicit environment flag.
 const enableInsecureRequestUpgrade =
-  process.env.ENABLE_UPGRADE_INSECURE_REQUESTS === "true" ||
-  process.env.NODE_ENV === "production";
+  booleanFlag("ENABLE_UPGRADE_INSECURE_REQUESTS", process.env.NODE_ENV === "production");
 
 const TRUSTED_PROXY_IPS = (process.env.TRUSTED_PROXY_IPS || "")
   .split(",")
@@ -442,10 +441,12 @@ wss.on("connection", (ws, req) => {
             (TEXT_HISTORY_ENABLED || !Number.isSafeInteger(parsed.start) || parsed.start < 0 ||
               !Number.isSafeInteger(parsed.deleteCount) || parsed.deleteCount < 0 ||
               typeof parsed.insert !== "string" ||
+              typeof parsed.updateId !== "string" || !parsed.updateId || parsed.updateId.length > 100 ||
               Buffer.byteLength(parsed.insert, "utf8") > MAX_TEXT_BYTES))
         ) {
           sendJson(ws, {
               type: "textUpdateError",
+              updateId: typeof parsed.updateId === "string" ? parsed.updateId : null,
               error: "Invalid text update for the configured text mode.",
             });
           return;
@@ -458,6 +459,7 @@ wss.on("connection", (ws, req) => {
         } catch (rateErr) {
           sendJson(ws, {
               type: "textUpdateError",
+              updateId: parsed.updateId,
               error: "Text update rate limit exceeded. Please try again later.",
               retryAfterMs: Math.max(1000, rateErr.msBeforeNext || 1000),
             });
@@ -476,6 +478,7 @@ wss.on("connection", (ws, req) => {
               });
             }
           });
+          sendJson(ws, { type: "textDeltaAccepted", updateId: parsed.updateId });
           return;
         }
         if (parsed.baseRevision !== roomClients.textState.revision) {
@@ -599,7 +602,7 @@ wss.on("connection", (ws, req) => {
         } else {
           pending.res.json({ ok: false, error: "Denied by owner" });
           console.info(
-            `invite: denied requestId=${requestId} token=${inviteToken} owner=${ws.id}`
+            `invite: denied requestId=${requestId} owner=${ws.id}`
           );
         }
         clearTimeout(pending.timeout);

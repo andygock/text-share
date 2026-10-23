@@ -65,46 +65,7 @@
     }
   };
 
-  const LINK_DETECTION_REGEX =
-    /\b((?:https?:\/\/)?(?:www\.)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:\/\S*)?)/gi;
   const NO_LINKS_MESSAGE = "No clickable links detected.";
-
-  const normalizeLinkCandidate = (raw) => {
-    if (!raw) {
-      return null;
-    }
-    let trimmed = raw.trim();
-    trimmed = trimmed.replace(/[.,!;:'")\]]+$/, "");
-    if (!trimmed) {
-      return null;
-    }
-    const hasScheme = /^https?:\/\//i.test(trimmed);
-    const href = hasScheme ? trimmed : `https://${trimmed}`;
-    return { display: trimmed, href };
-  };
-
-  const extractDetectedLinks = (text) => {
-    if (!text) {
-      return [];
-    }
-    const regex = new RegExp(LINK_DETECTION_REGEX.source, "gi");
-    const seen = new Set();
-    const matches = [];
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      const candidate = match[1] || match[0];
-      const normalized = normalizeLinkCandidate(candidate);
-      if (!normalized) {
-        continue;
-      }
-      if (seen.has(normalized.href)) {
-        continue;
-      }
-      seen.add(normalized.href);
-      matches.push(normalized);
-    }
-    return matches;
-  };
 
   const renderDetectedLinks = (text) => {
     if (!el.detectedLinks) {
@@ -112,7 +73,7 @@
     }
     const container = el.detectedLinks;
     container.textContent = "";
-    const links = extractDetectedLinks(text);
+    const links = window.extractDetectedLinks(text);
     if (!links.length) {
       container.dataset.empty = "true";
       container.textContent = NO_LINKS_MESSAGE;
@@ -231,8 +192,7 @@
     };
 
     socket.onclose = (event) => {
-      textReady = false;
-      pendingText = null;
+      textSync.disconnect();
       updateUserList([]);
       incomingUploads.clear();
       resetUpload("Connection lost during upload.");
@@ -356,7 +316,6 @@
   let currentPin = null;
   let currentPinInterval = null;
   let isUploading = false;
-  let currentUploadFilename = null;
   let activeUpload = null;
   let userCount = 0;
   let generalErrorTimer = null;
@@ -375,14 +334,6 @@
     }
     inputHash = (crc ^ 0xffffffff) >>> 0;
     return inputHash;
-  }
-
-  function splitBase64IntoChunks(base64, chunkSize) {
-    const chunks = [];
-    for (let i = 0; i < base64.length; i += chunkSize) {
-      chunks.push(base64.slice(i, i + chunkSize));
-    }
-    return chunks;
   }
 
   // --- Status / Error UI ---
@@ -591,14 +542,20 @@
 
     const lines = el.sharedTextarea.value.split("\n");
     el.barcodesDiv.innerHTML = "";
-    lines.forEach((line) => {
+    let count = 0;
+    for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed) {
-        return;
+      if (!trimmed) { continue; }
+      if (count++ >= 20) {
+        el.barcodesDiv.appendChild(create("p", {}, "Only the first 20 non-empty lines are shown as QR codes."));
+        break;
       }
       const item = create("div", { className: "barcode-item" });
       el.barcodesDiv.appendChild(item);
       try {
+        if (new TextEncoder().encode(trimmed).length > 1000) {
+          throw new Error("Line exceeds the QR code limit.");
+        }
         new QRCode(item, {
           text: trimmed,
           width: 128,
@@ -607,8 +564,8 @@
           colorLight: "#fff",
           correctLevel: QRCode.CorrectLevel.H,
         });
-      } catch (e) {
-        /* ignore */
+      } catch {
+        item.replaceChildren(create("p", {}, "This line could not be encoded. Shorten it to at most 1,000 UTF-8 bytes."));
       }
       const txt = create(
         "div",
@@ -616,7 +573,7 @@
         document.createTextNode(trimmed)
       );
       item.appendChild(txt);
-    });
+    }
   }
 
   if (el.generateBarcodesButton) {
@@ -642,187 +599,16 @@
     });
   }
 
-  // --- Text sync ---
-  // Revisions prevent a stale whole-document update from overwriting another writer.
-  // Local drafts remain in the textarea until accepted or explicitly discarded.
-  let revision = 0;
-  let sharedText = "";
-  let textReady = false;
-  let textDirty = false;
-  let pendingText = null;
-  let textTimer = null;
-  let maxTextBytes = 65536;
-  let textConflict = false;
-  let textHistoryEnabled = null;
-  let relayBaseline = el.sharedTextarea?.value || "";
-  const conflictPanel = create("div", { className: "text-conflict" });
-  conflictPanel.hidden = true;
-  const serverPreview = create("textarea");
-  serverPreview.readOnly = true;
-  serverPreview.setAttribute("aria-label", "Current shared text");
-  const useShared = create("button", { type: "button" }, "Use shared version");
-  const useDraft = create("button", { type: "button" }, "Share my version");
-  conflictPanel.append(create("p", {}, "Text changed on another device. Your draft is preserved above."),
-    serverPreview, useShared, useDraft);
-  el.sharedTextarea?.after(conflictPanel);
-
-  function renderSharedText(text) {
-    el.sharedTextarea.value = text;
-    renderDetectedLinks(text);
-    crc32(text);
-    if (el.generateBarcodesButton) { el.generateBarcodesButton.disabled = false; }
-  }
-
-  function showTextConflict() {
-    textConflict = true;
-    conflictPanel.hidden = false;
-    serverPreview.value = sharedText;
-  }
-
-  function sendText() {
-    clearTimeout(textTimer);
-    if (!textReady || !textDirty || pendingText ||
-      (textHistoryEnabled && textConflict)) { return; }
-    const text = el.sharedTextarea.value;
-    if (new TextEncoder().encode(text).length > maxTextBytes) {
-      setGeneralError({ text: `Text exceeds ${maxTextBytes} UTF-8 bytes. Your draft has not been shared.`, show: true, timeout: false });
-      return;
-    }
-    if (!textHistoryEnabled) {
-      const delta = calculateTextDelta(relayBaseline, text);
-      if (!delta) {
-        textDirty = false;
-        return;
-      }
-      if (safeSend({ type: "textDelta", ...delta })) {
-        relayBaseline = text;
-        textDirty = false;
-      }
-      return;
-    }
-    const updateId = makeId();
-    pendingText = { updateId, text };
-    if (!safeSend({ type: "textUpdate", text, baseRevision: revision, updateId })) {
-      pendingText = null;
-    }
-  }
-
-  function calculateTextDelta(previous, next) {
-    if (previous === next) { return null; }
-    let start = 0;
-    while (start < previous.length && start < next.length &&
-      previous[start] === next[start]) {
-      start++;
-    }
-    let previousEnd = previous.length;
-    let nextEnd = next.length;
-    while (previousEnd > start && nextEnd > start &&
-      previous[previousEnd - 1] === next[nextEnd - 1]) {
-      previousEnd--;
-      nextEnd--;
-    }
-    return {
-      start,
-      deleteCount: previousEnd - start,
-      insert: next.slice(start, nextEnd),
-    };
-  }
-
-  function receiveTextDelta(m) {
-    if (textHistoryEnabled !== false || !Number.isSafeInteger(m.start) ||
-      !Number.isSafeInteger(m.deleteCount) || typeof m.insert !== "string") {
-      return;
-    }
-
-    // Flush an unsent local edit before applying the incoming operation. A
-    // client joining mid-session has no base document, so out-of-range
-    // positions are clamped and only newly relayed content becomes visible.
-    if (textDirty) { sendText(); }
-    const current = el.sharedTextarea.value;
-    const start = Math.min(Math.max(0, m.start), current.length);
-    const deleteCount = Math.min(Math.max(0, m.deleteCount), current.length - start);
-    const next = current.slice(0, start) + m.insert + current.slice(start + deleteCount);
-    if (new TextEncoder().encode(next).length > maxTextBytes) { return; }
-    relayBaseline = next;
-    textDirty = false;
-    renderSharedText(next);
-  }
-
-  function receiveText(m) {
-    revision = m.revision;
-    sharedText = m.text;
-    const ownUpdate = pendingText && pendingText.updateId === m.updateId;
-    if (ownUpdate) {
-      pendingText = null;
-      textDirty = el.sharedTextarea.value !== sharedText;
-      setGeneralError({ text: "", show: false });
-      if (textDirty) { textTimer = setTimeout(sendText, 200); }
-    } else if (textDirty) {
-      if (el.sharedTextarea.value === sharedText) {
-        textDirty = false;
-      } else {
-        showTextConflict();
-      }
-    } else {
-      renderSharedText(sharedText);
-    }
-    if (textConflict) { serverPreview.value = sharedText; }
-  }
-
-  useShared.addEventListener("click", () => {
-    if (!textReady) { return; }
-    textDirty = false;
-    textConflict = false;
-    conflictPanel.hidden = true;
-    renderSharedText(sharedText);
+  const textSync = window.createTextSync({
+    el, create, renderDetectedLinks, crc32, safeSend, makeId, setGeneralError,
   });
-  useDraft.addEventListener("click", () => {
-    if (!textReady) { return; }
-    textConflict = false;
-    conflictPanel.hidden = true;
-    textDirty = true;
-    sendText();
-  });
-  if (el.sharedTextarea) {
-    el.sharedTextarea.addEventListener("input", () => {
-      textDirty = true;
-      renderDetectedLinks(el.sharedTextarea.value);
-      crc32(el.sharedTextarea.value);
-      if (el.generateBarcodesButton) { el.generateBarcodesButton.disabled = false; }
-      clearTimeout(textTimer);
-      textTimer = setTimeout(sendText, 200);
-    });
-  }
 
   // Each transfer has an ID, including files with identical names from different users.
   const incomingUploads = new Map();
 
   // --- Message handlers (map instead of big switch) ---
   const handlers = {
-    textUpdate: receiveText,
-    textDelta: receiveTextDelta,
-    textMode: (m) => {
-      textHistoryEnabled = false;
-      maxTextBytes = m.maxTextBytes;
-      textReady = true;
-      pendingText = null;
-      textConflict = false;
-      conflictPanel.hidden = true;
-      relayBaseline = el.sharedTextarea?.value || "";
-      textDirty = false;
-    },
-    textSnapshot: (m) => {
-      textHistoryEnabled = true;
-      maxTextBytes = m.maxTextBytes;
-      textReady = true;
-      receiveText(m);
-      sendText();
-    },
-    textConflict: (m) => {
-      pendingText = null;
-      receiveText(m);
-      if (textDirty) { showTextConflict(); }
-    },
+    ...textSync.handlers,
     userList: (m) => updateUserList(m.users || []),
     userConnected: (m) => addUser(m.ip),
     userDisconnected: (m) => removeUser(m.ip),
@@ -1035,11 +821,7 @@
       reqDiv.appendChild(btnWrap);
       el.incomingRequestsDiv.appendChild(reqDiv);
     },
-    textUpdateError: (m) => {
-      pendingText = null;
-      setGeneralError({ text: m.error, show: true, timeout: false });
-      if (m.retryAfterMs) { clearTimeout(textTimer); textTimer = setTimeout(sendText, m.retryAfterMs); }
-    },
+
   };
 
   // --- Upload logic ---
@@ -1057,13 +839,11 @@
     clearTimeout(upload.timeout);
     if (error) { upload.reject(new Error(error)); }
     isUploading = false;
-    currentUploadFilename = null;
     if (el.imageInput) { el.imageInput.value = ""; }
   }
 
   async function uploadImage(file) {
     isUploading = true;
-    currentUploadFilename = file.name;
     const id = makeId();
     let ready;
     let reject;
@@ -1136,7 +916,6 @@
       console.error("upload error", err);
       showUploadError("Upload failed.");
       isUploading = false;
-      currentUploadFilename = null;
     });
   }
 

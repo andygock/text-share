@@ -3,8 +3,17 @@ const path = require("path");
 const { sendJson } = require("./socket-utils");
 const { positiveInteger } = require("./config");
 const MAX_PROCESSING = positiveInteger("MAX_IMAGE_PROCESSING", 2);
+const MAX_BUFFERED_UPLOAD_BYTES = positiveInteger("MAX_BUFFERED_UPLOAD_BYTES", 50 * 1024 * 1024);
 const UPLOAD_TIMEOUT_MS = positiveInteger("UPLOAD_TIMEOUT_MS", 60000);
 let processingCount = 0;
+let bufferedUploadBytes = 0;
+
+function releaseBufferedBytes(state) {
+  if (state.reservedBytes) {
+    bufferedUploadBytes -= state.reservedBytes;
+    state.reservedBytes = 0;
+  }
+}
 
 function finishUpload(ws, clients, state, error) {
   clearTimeout(state.timeout);
@@ -12,6 +21,7 @@ function finishUpload(ws, clients, state, error) {
     ws.imageUploadState = null;
   }
   state.cancelled = true;
+  releaseBufferedBytes(state);
   state.chunks = [];
   if (error) {
     for (const client of clients) {
@@ -21,7 +31,8 @@ function finishUpload(ws, clients, state, error) {
 }
 
 function startUpload(ws, clients, metadata) {
-  const state = { ...metadata, chunks: [], received: 0, receivedBytes: 0, totalChunks: null, processing: false };
+  const state = { ...metadata, chunks: [], received: 0, receivedBytes: 0, reservedBytes: 0,
+    totalChunks: null, processing: false };
   ws.imageUploadState = state;
   state.timeout = setTimeout(() => finishUpload(ws, clients, state, "Upload timed out."), UPLOAD_TIMEOUT_MS);
   return state;
@@ -60,6 +71,11 @@ async function handleImageUploadChunk(parsed, ws, roomClients, processImageBuffe
   if (state.receivedBytes > maxSize || state.receivedBytes > state.size) {
     return fail("Upload exceeds declared or allowed size.");
   }
+  if (bufferedUploadBytes + chunk.length > MAX_BUFFERED_UPLOAD_BYTES) {
+    return fail("Buffered upload capacity is full. Please retry shortly.");
+  }
+  bufferedUploadBytes += chunk.length;
+  state.reservedBytes += chunk.length;
   state.chunks[chunkIndex] = chunk;
   state.received++;
   state.totalChunks = totalChunks;
@@ -83,6 +99,7 @@ async function handleImageUploadChunk(parsed, ws, roomClients, processImageBuffe
   try {
     const buffer = Buffer.concat(state.chunks, state.receivedBytes);
     state.chunks = [];
+    releaseBufferedBytes(state);
     const result = await processImageBuffer(buffer, path.extname(state.filename).toLowerCase());
     if (state.cancelled || ws.readyState !== 1) {
       return;
@@ -90,10 +107,11 @@ async function handleImageUploadChunk(parsed, ws, roomClients, processImageBuffe
     if (result.size > 500 * 1024) {
       return fail("Image could not be compressed below 500 KiB.");
     }
+    const data = result.buffer.toString("base64");
     for (const client of roomClients) {
       sendJson(client, { type: "imageUploadComplete", uploadId: state.uploadId, filename: state.filename,
         mimeType: result.mimeType, width: result.width, height: result.height,
-        size: result.size, data: result.buffer.toString("base64") });
+        size: result.size, data });
     }
   } catch {
     if (!state.cancelled) {

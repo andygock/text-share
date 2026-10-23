@@ -39,7 +39,7 @@ test("relay-only mode forwards deltas and never replays room text", async () => 
   const child = spawn(process.execPath, ["server.js"], {
     cwd: path.join(__dirname, ".."),
     env: { ...process.env, PORT: String(port), ALLOWED_ORIGINS: "",
-      TEXT_HISTORY_ENABLED: "false", PER_IP_TEXT_LIMIT: "60", GLOBAL_TEXT_LIMIT: "600" },
+      TEXT_HISTORY_ENABLED: "false", PER_IP_TEXT_LIMIT: "1", GLOBAL_TEXT_LIMIT: "600", TEXT_LIMIT_WINDOW_SECONDS: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const clients = [];
@@ -57,11 +57,23 @@ test("relay-only mode forwards deltas and never replays room text", async () => 
     clients.push(sender, recipient);
     assert.equal((await sender.take("textMode")).historyEnabled, false);
     await recipient.take("textMode");
-    sender.send(JSON.stringify({ type: "textDelta", start: 0, deleteCount: 0, insert: "new" }));
+    sender.send(JSON.stringify({ type: "textDelta", start: 0, deleteCount: 0, insert: "new", updateId: "first" }));
     assert.deepEqual(await recipient.take("textDelta"), {
       type: "textDelta", start: 0, deleteCount: 0, insert: "new",
     });
+    assert.equal((await sender.take("textDeltaAccepted")).updateId, "first");
     assert.equal(sender.messages.some((message) => message.type === "textDelta"), false);
+
+    const second = { type: "textDelta", start: 3, deleteCount: 0, insert: "er", updateId: "second" };
+    sender.send(JSON.stringify(second));
+    const rejection = await sender.take("textUpdateError");
+    assert.equal(rejection.updateId, "second");
+    assert.ok(rejection.retryAfterMs >= 1000);
+    assert.equal(recipient.messages.some((message) => message.type === "textDelta"), false);
+    await new Promise((resolve) => setTimeout(resolve, rejection.retryAfterMs));
+    sender.send(JSON.stringify(second));
+    assert.equal((await sender.take("textDeltaAccepted")).updateId, "second");
+    assert.equal((await recipient.take("textDelta")).insert, "er");
 
     sender.close();
     recipient.close();

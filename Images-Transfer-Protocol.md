@@ -5,7 +5,7 @@ This document describes the WebSocket-based protocol for real-time, in-memory im
 ## Overview
 
 - Images are never stored on disk. All processing and transfer is performed in memory.
-- When a user uploads an image, it is processed (resized, compressed, metadata stripped) in memory on the server, then streamed to all other connected users in the room via WebSocket.
+- When a user uploads an image, it is processed (resized, compressed, metadata stripped) in memory on the server, then sent as one complete base64 WebSocket message to all connected users in the room, including the uploader.
 - Both uploaders and downloaders receive progress updates and image info (dimensions, file size).
 
 ## Message Types
@@ -43,7 +43,7 @@ Sent by the uploader to the server after an `imageUploadReady` acknowledgement w
 
 ### 3. `imageUploadProgress`
 
-Sent by the server to all clients (including uploader) to indicate upload/download progress.
+Sent by the server to all clients (including uploader) to indicate upload progress at the server. Recipients receive image bytes only in the completion message.
 
 ```json
 {
@@ -99,4 +99,5 @@ Sent to the uploader for admission failures, or all current room members for an 
 - All image data is transferred as base64-encoded strings for compatibility.
 - The server assembles chunks in index order. Recipients decode the complete processed image from `imageUploadComplete.data`.
 - Progress is calculated as the percentage of total chunks received, not processing progress.
-- No image data is written to disk at any point.
+- Incomplete upload chunks share a global `MAX_BUFFERED_UPLOAD_BYTES` budget (50 MiB by default). Exceeding the budget aborts the current upload and releases its chunks. Processing memory is bounded separately by concurrency and pixel limits.
+- No image data is written to disk by the application.
